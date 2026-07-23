@@ -1,0 +1,21 @@
+# Virtual environments
+venv/
+.venv/
+venv_docling_test/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Environment variables
+.env
+
+# macOS
+.DS_Store
+
+# Vector database
+chroma_db/
+
+# Generated extracted text
+extracted_text/

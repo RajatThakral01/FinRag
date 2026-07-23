@@ -1,0 +1,50 @@
+import json
+
+def parse_hallucination(llm_output: str) -> str:
+    """
+    Checks only the last line (same defensive pattern as parse_grade).
+    Checks 'not_grounded' before 'grounded' — 'grounded' is a substring
+    of 'not_grounded', so checking in the wrong order would misclassify
+    every hallucinated answer as grounded.
+    Defaults to 'not_grounded': safer to treat an unparseable response
+    as unverified than to risk certifying a hallucinated answer as final.
+    """
+    last_line = llm_output.strip().split("\n")[-1].strip().lower()
+    if "not_grounded" in last_line:
+        return "not_grounded"
+    elif "grounded" in last_line:
+        return "grounded"
+    return "not_grounded"
+
+def parse_grade(llm_output: str) -> str:
+    last_line = llm_output.strip().splitlines()[-1].strip().lower()
+    if "yes" in last_line:
+        return "yes"
+    return "no" 
+
+def parse_companies(llm_output: str) -> list[str]:
+    text = llm_output.strip()
+
+    if text.startswith("```"):
+        text = text.strip("`")
+        if text.lower().startswith("json"):
+            text = text[4:]
+        text = text.strip()
+
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return ["all"]
+
+    if not isinstance(parsed, list):
+        return ["all"]
+
+    return parsed
+
+def parse_route(llm_output: str) -> str:
+    text = llm_output.strip().lower()
+    if "calculate" in text or "math" in text or "compute" in text:
+        return "calculate"
+    if "direct" in text or "general" in text or "definition" in text:
+        return "direct"
+    return "retrieve"  # default — safest fallback
