@@ -1,4 +1,4 @@
-import json
+import json , re
 
 def parse_hallucination(llm_output: str) -> str:
     """
@@ -48,3 +48,21 @@ def parse_route(llm_output: str) -> str:
     if "direct" in text or "general" in text or "definition" in text:
         return "direct"
     return "retrieve"  # default — safest fallback
+
+def parse_calculation(llm_output: str) -> dict:
+    """
+    Defensive JSON parsing, same pattern as parse_companies (PRD 11.4) —
+    models sometimes wrap JSON in code fences or add commentary despite
+    instructions not to. Falls back to insufficient_data: safe because it
+    routes to the "can't calculate" message rather than crashing or
+    silently computing on garbage.
+    """
+    try:
+        match = re.search(r'\{.*\}', llm_output, re.DOTALL)
+        if match:
+            parsed = json.loads(match.group())
+            if "operation" in parsed and "values" in parsed:
+                return parsed
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return {"operation": "insufficient_data", "values": []}

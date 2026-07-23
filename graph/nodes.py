@@ -5,11 +5,11 @@ from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from langchain_core.prompts import ChatPromptTemplate
 
 import config
-from tools.output_parsers import parse_route, parse_companies
+from tools.output_parsers import parse_route, parse_companies, parse_grade, parse_hallucination, parse_calculation
+from tools.calculator import compute
 from graph.state import create_initial_state, GraphState
 from tools.vectorstore import get_vectorstore
 from tools.company_names import SHORT_TO_FULL, get_all_full_names
-from tools.output_parsers import parse_route, parse_companies, parse_grade
 
 router_prompt = ChatPromptTemplate.from_messages([
     ("system",
@@ -111,20 +111,19 @@ generate_prompt = ChatPromptTemplate.from_messages([
     ("human", "Question: {question}\nContext: {context}"),
 ])
 
-hallucination_prompt = ChatPromptTemplate.from_messages([
-    ("system",
-     "You are a hallucination detector for financial answers. Given an "
-     "answer and the source chunks it was generated from, verify that "
-     "every specific number, percentage, date, and financial figure in "
-     "the answer is directly traceable to the source chunks. "
-     "First, briefly reason through each specific figure in the answer "
-     "and whether it appears in the source chunks. Then, on a new final "
-     "line by itself, write exactly one word: 'grounded' if every "
-     "specific claim in the answer exists in the chunks, or "
-     "'not_grounded' if the answer contains any figure not present in "
-     "the chunks."),
-    ("human", "Answer: {answer}\nSource chunks: {chunks}"),
-])
+
+def generate_node(state: GraphState) -> dict:
+    question = state["rewritten_question"] or state["question"]
+    context = _format_context(state["retrieved_chunks"], state["chunk_sources"])
+
+    llm = ChatNVIDIA(model=config.MODEL_GENERATOR, temperature=0.0)
+    chain = generate_prompt | llm
+
+    response = chain.invoke({"question": question, "context": context})
+    answer = response.content.strip()
+
+    return {"answer": answer}
+
 
 direct_answer_prompt = ChatPromptTemplate.from_messages([
     ("system",
@@ -142,7 +141,7 @@ direct_answer_prompt = ChatPromptTemplate.from_messages([
 def direct_answer_node(state: GraphState) -> dict:
     question = state["question"]
 
-    llm = ChatNVIDIA(model=config.MODEL_GENERATE, temperature=0.0)
+    llm = ChatNVIDIA(model=config.MODEL_GENERATOR, temperature=0.0)
     chain = direct_answer_prompt | llm
 
     response = chain.invoke({"question": question})
@@ -150,20 +149,125 @@ def direct_answer_node(state: GraphState) -> dict:
 
     return {"answer": answer, "final_answer": answer}
 
+
+calculator_extract_prompt = ChatPromptTemplate.from_messages([
+    ("system",
+     "You extract the exact numbers needed to answer a financial "
+     "calculation question, using ONLY the provided source chunks — never "
+     "numbers from memory or training data. "
+     "Identify the single arithmetic operation needed: one of "
+     "'percent_change', 'difference', 'sum', 'average', 'ratio', 'margin', "
+     "'max', 'min'. "
+     "Ordering rules: "
+     "For 'percent_change', 'difference', and 'ratio', list the "
+     "BASE/OLDER/DENOMINATOR value first, the NEW/COMPARISON/NUMERATOR "
+     "value second. "
+     "For 'margin', list the base value (e.g. revenue) first, the amount "
+     "to subtract (e.g. cost of goods sold) second. "
+     "For 'max' and 'min', list every value being compared — not just two. "
+     "Respond with ONLY a JSON object, no other text, in this exact shape: "
+     '{{"operation": "percent_change", "values": '
+     '[{{"label": "Apple FY2023 revenue", "value": 383285000000}}, '
+     '{{"label": "Apple FY2024 revenue", "value": 391035000000}}]}}. '
+     "If the source chunks do not contain the specific numbers needed, "
+     'respond with {{"operation": "insufficient_data", "values": []}}.'),
+    ("human", "Question: {question}\nSource chunks: {chunks}"),
+])
+
+
+def calculator_node(state: GraphState) -> dict:
+    question = state["rewritten_question"] or state["question"]
+    context = _format_context(state["retrieved_chunks"], state["chunk_sources"])
+
+    llm = ChatNVIDIA(model=config.MODEL_GENERATOR, temperature=0.0)
+    chain = calculator_extract_prompt | llm
+
+    response = chain.invoke({"question": question, "chunks": context})
+    extraction = parse_calculation(response.content)
+
+    if extraction["operation"] == "insufficient_data" or not extraction["values"]:
+        answer = (
+            "I found relevant chunks, but couldn't extract the specific "
+            "numbers needed to perform this calculation. Try rephrasing "
+            "with more specific terms."
+        )
+        return {"answer": answer}
+
+    try:
+        result = compute(extraction["operation"], extraction["values"])
+        labels = ", ".join(f"{v['label']} = {v['value']:,}" for v in extraction["values"])
+        op_name = extraction["operation"].replace("_", " ")
+
+        if extraction["operation"] in ("max", "min"):
+            answer = f"Comparing {labels}, the {op_name} is {result['label']} at {result['value']:,}."
+        else:
+            answer = f"Using {labels}, the {op_name} is {result}."
+    except (ValueError, IndexError, KeyError, ZeroDivisionError) as e:
+        answer = f"Could not complete the calculation: {e}"
+
+    return {"answer": answer}
+
+
+hallucination_prompt = ChatPromptTemplate.from_messages([
+    ("system",
+     "You are a hallucination detector for financial answers. Given an "
+     "answer and the source chunks it was generated from, verify that "
+     "every specific number, percentage, date, and financial figure in "
+     "the answer is directly traceable to the source chunks. "
+     "First, briefly reason through each specific figure in the answer "
+     "and whether it appears in the source chunks. Then, on a new final "
+     "line by itself, write exactly one word: 'grounded' if every "
+     "specific claim in the answer exists in the chunks, or "
+     "'not_grounded' if the answer contains any figure not present in "
+     "the chunks."),
+    ("human", "Answer: {answer}\nSource chunks: {chunks}"),
+])
+
+
 def hallucination_check_node(state: GraphState) -> dict:
     answer = state["answer"]
-    chunks = "\n\n".join(state["retrieved_chunks"])
+    context = _format_context(state["retrieved_chunks"], state["chunk_sources"])
 
-    llm = ChatNVIDIA(model=config.MODEL_HALLUCINATION, temperature=0.0)
+    llm = ChatNVIDIA(model=config.MODEL_HALLUC, temperature=0.0)
     chain = hallucination_prompt | llm
 
-    response = chain.invoke({"answer": answer, "chunks": chunks})
+    response = chain.invoke({"answer": answer, "chunks": context})
     grounded = parse_hallucination(response.content)
 
-    update = {"grounded": grounded}
     if grounded == "grounded":
-        update["final_answer"] = answer
-    return update
+        return {"grounded": grounded, "final_answer": answer}
+
+    # not grounded — increment the shared retry counter (PRD 12.2)
+    return {"grounded": grounded, "retry_count": state["retry_count"] + 1}
+
+
+def grade_exhausted_warning_node(state: GraphState) -> dict:
+    """
+    Runs only when Grade said 'no' but retries are exhausted (PRD 12.1
+    row 1). Lets the pipeline continue to Generate/Calculator with the
+    best available chunks, but records a warning rather than silently
+    proceeding as if retrieval succeeded.
+    """
+    return {
+        "error_message": (
+            "Answer generated from best available context. Retrieval "
+            "confidence was low — verify with source document."
+        )
+    }
+
+
+def hallucination_exhausted_node(state: GraphState) -> dict:
+    """
+    Runs when Hallucination Check has failed MAX_RETRY times (PRD 12.1
+    row 2). Returns an honest failure message as final_answer instead of
+    the unverified/possibly-hallucinated answer.
+    """
+    message = (
+        "Could not generate a verified answer for this question. The "
+        "model was unable to produce an answer grounded in the source "
+        "documents. Try rephrasing or asking a more specific question."
+    )
+    return {"final_answer": message, "error_message": message}
 
 def _format_context(retrieved_chunks: list[str], chunk_sources: list[dict]) -> str:
     """
@@ -180,17 +284,7 @@ def _format_context(retrieved_chunks: list[str], chunk_sources: list[dict]) -> s
     return "\n\n".join(labeled_sections)
 
 
-def generate_node(state: GraphState) -> dict:
-    question = state["rewritten_question"] or state["question"]
-    context = _format_context(state["retrieved_chunks"], state["chunk_sources"])
 
-    llm = ChatNVIDIA(model=config.MODEL_GENERATE, temperature=0.0)
-    chain = generate_prompt | llm
-
-    response = chain.invoke({"question": question, "context": context})
-    answer = response.content.strip()
-
-    return {"answer": answer}
 
 def rewrite_node(state: GraphState) -> dict:
     llm = ChatNVIDIA(
