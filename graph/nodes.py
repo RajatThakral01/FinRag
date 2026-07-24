@@ -71,10 +71,20 @@ grade_prompt = ChatPromptTemplate.from_messages([
      "If the question asks about Company A but the excerpts are about "
      "Company B, the answer is \"no\" — even if the excerpts fully answer "
      "the equivalent question for Company B.\n\n"
-     "First, briefly reason about whether the excerpts contain the SPECIFIC "
-     "fact, figure, or explanation needed to answer the question AS WRITTEN. "
-     "Excerpts that only mention the topic in passing (e.g. a table of "
-     "contents listing a section name) do not count as containing the answer.\n\n"
+     "This question requires information about the following companies: "
+     "{companies}.\n\n"
+     "MULTI-COMPANY RULE: if more than one company is listed above, check "
+     "EACH company individually. Answer \"yes\" ONLY if the excerpts "
+     "contain the specific fact or figure needed for EVERY company "
+     "listed — not most of them, not the majority, not \"enough to "
+     "attempt an answer.\" If even ONE listed company is missing its "
+     "specific figure, the answer is \"no,\" even if every other company "
+     "is fully covered.\n\n"
+     "First, briefly reason company-by-company: for each company listed, "
+     "state whether its specific figure is present or missing in the "
+     "excerpts. Excerpts that only mention the topic in passing (e.g. a "
+     "table of contents entry, or a table from that company on a "
+     "completely unrelated topic) do not count as containing the answer.\n\n"
      "Then, on the FINAL line of your response, write ONLY the word "
      "\"yes\" or \"no\" — nothing else on that line."),
     ("human",
@@ -157,20 +167,44 @@ calculator_extract_prompt = ChatPromptTemplate.from_messages([
      "numbers from memory or training data. "
      "Identify the single arithmetic operation needed: one of "
      "'percent_change', 'difference', 'sum', 'average', 'ratio', 'margin', "
-     "'max', 'min'. "
-     "Ordering rules: "
+     "'max', 'min'.\n\n"
+     "OPERATION SELECTION RULES:\n"
+     "- When comparing two PERCENTAGE-based metrics (margins, growth "
+     "rates, percentages of revenue, etc.), use 'difference' to get the "
+     "point gap — NEVER 'ratio' of two percentages; a ratio of two "
+     "percentages is not a meaningful financial comparison.\n"
+     "- When comparing two DOLLAR amounts (revenue, R&D spend, net "
+     "income, etc.), 'ratio' (how many times larger) or 'difference' "
+     "(dollar gap) are both valid — pick whichever the question implies "
+     "('how many times' -> ratio; 'by how much' -> difference).\n\n"
+     "CONSOLIDATED FIGURE RULE: if a company reports multiple segment- or "
+     "product-level breakdowns of a metric (e.g. automotive margin vs. "
+     "energy margin) rather than one total company-wide figure, ALWAYS "
+     "prefer the CONSOLIDATED total (e.g. 'Total revenues' and 'Total "
+     "gross profit') over any single segment's figure. If the "
+     "consolidated percentage isn't directly stated but the consolidated "
+     "dollar totals ARE present, extract those totals and use the "
+     "'margin' operation to compute it — never substitute an unlabeled "
+     "segment percentage for the company-wide total.\n\n"
+     "MISSING COMPANY RULE: if the question involves multiple companies "
+     "and the chunks do NOT contain the specific figure for one or more "
+     "of them, do not silently omit that company. Include it in 'values' "
+     "with value 0 and a label ending in ' (not found in retrieved "
+     "chunks)', so the gap is visible rather than hidden.\n\n"
+     "ORDERING RULES:\n"
      "For 'percent_change', 'difference', and 'ratio', list the "
-     "BASE/OLDER/DENOMINATOR value first, the NEW/COMPARISON/NUMERATOR "
-     "value second. "
-     "For 'margin', list the base value (e.g. revenue) first, the amount "
-     "to subtract (e.g. cost of goods sold) second. "
-     "For 'max' and 'min', list every value being compared — not just two. "
+     "BASE/OLDER/DENOMINATOR value first, NEW/COMPARISON/NUMERATOR "
+     "second.\n"
+     "For 'margin', list the base value (e.g. total revenue) first, the "
+     "amount to subtract (e.g. total cost of revenue) second.\n"
+     "For 'max' and 'min', list every value being compared — not just two.\n\n"
      "Respond with ONLY a JSON object, no other text, in this exact shape: "
      '{{"operation": "percent_change", "values": '
      '[{{"label": "Apple FY2023 revenue", "value": 383285000000}}, '
      '{{"label": "Apple FY2024 revenue", "value": 391035000000}}]}}. '
-     "If the source chunks do not contain the specific numbers needed, "
-     'respond with {{"operation": "insufficient_data", "values": []}}.'),
+     "If the source chunks do not contain the specific numbers needed for "
+     'ANY of the companies involved, respond with '
+     '{{"operation": "insufficient_data", "values": []}}.'),
     ("human", "Question: {question}\nSource chunks: {chunks}"),
 ])
 
@@ -193,15 +227,28 @@ def calculator_node(state: GraphState) -> dict:
         )
         return {"answer": answer}
 
+    missing = [v for v in extraction["values"] if "(not found in retrieved chunks)" in v["label"]]
+    found = [v for v in extraction["values"] if v not in missing]
+
+    # Exclude placeholders from max/min so a 0 never wins — but still disclose them
+    compute_values = found if (extraction["operation"] in ("max", "min") and missing) else extraction["values"]
+
+    if not compute_values:
+        return {"answer": "Couldn't find the needed figures for any company in the retrieved chunks."}
+
     try:
-        result = compute(extraction["operation"], extraction["values"])
-        labels = ", ".join(f"{v['label']} = {v['value']:,}" for v in extraction["values"])
+        result = compute(extraction["operation"], compute_values)
+        labels = ", ".join(f"{v['label']} = {v['value']:,}" for v in compute_values)
         op_name = extraction["operation"].replace("_", " ")
 
         if extraction["operation"] in ("max", "min"):
             answer = f"Comparing {labels}, the {op_name} is {result['label']} at {result['value']:,}."
         else:
             answer = f"Using {labels}, the {op_name} is {result}."
+
+        if missing:
+            missing_names = ", ".join(v["label"].replace(" (not found in retrieved chunks)", "") for v in missing)
+            answer += f" Note: figures for {missing_names} were not found in the retrieved chunks and are excluded from this comparison."
     except (ValueError, IndexError, KeyError, ZeroDivisionError) as e:
         answer = f"Could not complete the calculation: {e}"
 
@@ -316,10 +363,18 @@ def grade_node(state: GraphState) -> dict:
     chunks_text = "\n\n---\n\n".join(state["retrieved_chunks"])
     active_question = state["rewritten_question"] or state["question"]
 
+    companies = state.get("companies_mentioned") or []
+    if companies == ["all"]:
+        companies_list = get_all_full_names()
+    else:
+        companies_list = [SHORT_TO_FULL.get(c, c) for c in companies]
+    companies_str = ", ".join(companies_list) if companies_list else "the company in question"
+
     chain = grade_prompt | llm
     response = chain.invoke({
         "question": active_question,
-        "chunks": chunks_text
+        "chunks": chunks_text,
+        "companies": companies_str
     })
 
     relevant = parse_grade(response.content)
@@ -369,7 +424,7 @@ def retrieve_node(state: GraphState) -> dict:
 
     if companies == ["all"]:
         for full_name in get_all_full_names():
-            docs = vectorstore.similarity_search(query, k=2, filter={"company": full_name})
+            docs = vectorstore.similarity_search(query, k=4, filter={"company": full_name})
             all_docs.extend(docs)
 
     elif len(companies) == 1:
