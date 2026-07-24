@@ -7,6 +7,11 @@ venv_docling_test/
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyc
+
+# Diagnostic / Scratch files
+scratch_*.py
+bm25_index.pkl
 
 # Environment variables
 .env
