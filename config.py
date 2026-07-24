@@ -12,6 +12,7 @@ TOP_K              = 5     # chunks to retrieve
 MAX_RETRY          = 3     # max rewrite retries
 CHROMA_PATH        = "./chroma_db"
 COLLECTION_NAME    = "financial_10k"
+BM25_INDEX_PATH    = "./bm25_index.pkl"
     
 # Model per node (see Chapter 13)
 MODEL_ROUTER       = "meta/llama-3.1-8b-instruct"   # fast, cheap

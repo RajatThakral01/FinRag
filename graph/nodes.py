@@ -10,6 +10,7 @@ from tools.calculator import compute
 from graph.state import create_initial_state, GraphState
 from tools.vectorstore import get_vectorstore
 from tools.company_names import SHORT_TO_FULL, get_all_full_names
+from tools.bm25_index import bm25_query
 
 router_prompt = ChatPromptTemplate.from_messages([
     ("system",
@@ -400,6 +401,7 @@ def router_node(state: GraphState) -> dict:
     return {"route": route, "companies_mentioned": companies_mentioned}
 
 def _chunks_to_state(docs: list) -> tuple[list[str], list[dict]]:
+    """Convert Chroma Document objects to parallel (texts, sources) lists."""
     texts = [doc.page_content for doc in docs]
     sources = [
         {
@@ -415,33 +417,127 @@ def _chunks_to_state(docs: list) -> tuple[list[str], list[dict]]:
     return texts, sources
 
 
+_RRF_K = 60  # standard RRF constant (Ch 21.2)
+
+
+def _rrf_merge(
+    vector_docs: list,
+    bm25_results: list[dict],
+    final_k: int,
+) -> tuple[list[str], list[dict]]:
+    """
+    Merge per-company vector and BM25 results via Reciprocal Rank Fusion.
+
+    RRF_score(chunk) = 1/(60 + rank_in_vector) + 1/(60 + rank_in_bm25)
+
+    A chunk surfaced by only one method still receives a score — it isn't
+    dropped for lack of overlap.  The merged list is truncated to `final_k`.
+
+    Args:
+        vector_docs:  Chroma Document objects, already ranked (index 0 = best).
+        bm25_results: Output of bm25_query(), already ranked (rank key is
+                      1-based, but we use list position for RRF).
+        final_k:      How many chunks to return after merging.
+
+    Returns:
+        (texts, sources) parallel lists ready to extend into GraphState.
+    """
+    # Index vector docs by chunk_id for dedup and score accumulation
+    # chunk_id is the canonical key; text + metadata travel with it.
+    scores: dict[str, float] = {}
+    texts_map: dict[str, str] = {}
+    sources_map: dict[str, dict] = {}
+
+    # --- vector contributions (1-based rank = list index + 1) ---
+    for rank_0, doc in enumerate(vector_docs):
+        cid = doc.metadata.get("chunk_id", f"vec_{rank_0}")
+        rrf = 1.0 / (_RRF_K + rank_0 + 1)
+        scores[cid] = scores.get(cid, 0.0) + rrf
+        texts_map[cid] = doc.page_content
+        sources_map[cid] = {
+            "chunk_id":    doc.metadata.get("chunk_id"),
+            "company":     doc.metadata.get("company"),
+            "ticker":      doc.metadata.get("ticker"),
+            "section_name": doc.metadata.get("section_name"),
+            "chunk_type":  doc.metadata.get("chunk_type"),
+            "table_name":  doc.metadata.get("table_name"),
+        }
+
+    # --- BM25 contributions (result["rank"] is already 1-based) ---
+    for result in bm25_results:
+        cid = result["metadata"].get("chunk_id", result["id"])
+        rrf = 1.0 / (_RRF_K + result["rank"])
+        scores[cid] = scores.get(cid, 0.0) + rrf
+        if cid not in texts_map:
+            texts_map[cid] = result["text"]
+            meta = result["metadata"]
+            sources_map[cid] = {
+                "chunk_id":    meta.get("chunk_id"),
+                "company":     meta.get("company"),
+                "ticker":      meta.get("ticker"),
+                "section_name": meta.get("section_name"),
+                "chunk_type":  meta.get("chunk_type"),
+                "table_name":  meta.get("table_name"),
+            }
+
+    # Sort descending by RRF score, truncate to final_k
+    top_ids = sorted(scores, key=lambda c: scores[c], reverse=True)[:final_k]
+
+    texts   = [texts_map[c]   for c in top_ids]
+    sources = [sources_map[c] for c in top_ids]
+    return texts, sources
+
+
 def retrieve_node(state: GraphState) -> dict:
+    """
+    Hybrid retrieval: vector search (Chroma) + BM25 search, merged per company
+    via Reciprocal Rank Fusion.  Final chunk counts are unchanged from the
+    pure-vector version (Ch 09.2 / Ch 21.4):
+      - single company : 5 chunks
+      - two-company    : 4 chunks per company  (8 total)
+      - ["all"]        : 4 chunks per company  (36 total)
+    """
     vectorstore = get_vectorstore()
     query = state["rewritten_question"] or state["question"]
     companies = state["companies_mentioned"]
 
-    all_docs = []
+    all_texts:   list[str]  = []
+    all_sources: list[dict] = []
 
     if companies == ["all"]:
         for full_name in get_all_full_names():
-            docs = vectorstore.similarity_search(query, k=4, filter={"company": full_name})
-            all_docs.extend(docs)
+            vec_docs = vectorstore.similarity_search(
+                query, k=4, filter={"company": full_name}
+            )
+            bm25_res = bm25_query(query, full_name, top_k=20)
+            texts, sources = _rrf_merge(vec_docs, bm25_res, final_k=4)
+            all_texts.extend(texts)
+            all_sources.extend(sources)
 
     elif len(companies) == 1:
         full_name = SHORT_TO_FULL.get(companies[0])
         if full_name:
-            all_docs = vectorstore.similarity_search(query, k=5, filter={"company": full_name})
+            vec_docs = vectorstore.similarity_search(
+                query, k=5, filter={"company": full_name}
+            )
+            bm25_res = bm25_query(query, full_name, top_k=20)
+            texts, sources = _rrf_merge(vec_docs, bm25_res, final_k=5)
+            all_texts.extend(texts)
+            all_sources.extend(sources)
 
-    else:
+    else:  # two or more specific companies
         for short_name in companies:
             full_name = SHORT_TO_FULL.get(short_name)
             if full_name:
-                docs = vectorstore.similarity_search(query, k=4, filter={"company": full_name})
-                all_docs.extend(docs)
+                vec_docs = vectorstore.similarity_search(
+                    query, k=4, filter={"company": full_name}
+                )
+                bm25_res = bm25_query(query, full_name, top_k=20)
+                texts, sources = _rrf_merge(vec_docs, bm25_res, final_k=4)
+                all_texts.extend(texts)
+                all_sources.extend(sources)
 
-    texts, sources = _chunks_to_state(all_docs)
-
-    return {"retrieved_chunks": texts, "chunk_sources": sources}
+    return {"retrieved_chunks": all_texts, "chunk_sources": all_sources}
 
 if __name__ == "__main__":
     print("=== Router tests ===")

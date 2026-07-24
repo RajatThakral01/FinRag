@@ -1,5 +1,5 @@
 # 📊 Financial Intelligence RAG System
-### Multi-Company 10-K Analysis · Adaptive RAG · LangGraph · NVIDIA NIM
+### Multi-Company 10-K Analysis · Adaptive RAG · LangGraph · NVIDIA NIM · Docling
 
 A **production-grade Retrieval-Augmented Generation (RAG) pipeline** built on 2024 Annual Report (10-K) filings from 9 major technology companies. Users ask natural language questions about financial data and receive accurate, grounded, verifiable answers — with hallucination detection, relevance grading, query rewriting, and intelligent routing all built in.
 
@@ -27,14 +27,19 @@ The pipeline has two phases:
 
 ### Phase 1 — Ingestion (runs once)
 ```
-PDF files  →  text_extractor.py  →  extracted_text/*.md
-               ↓
+PDF files  →  text_extractor.py (Docling)  →  extracted_text/*.md
+                    ↓
+         Docling converts each PDF to structured markdown
+         (table structure detection on, OCR off, run once per file)
+                    ↓
 ingestion/line_classifier.py   — classify lines (section header / table / prose)
 ingestion/chunker.py           — split into ≤450-token chunks (two-track strategy)
 ingestion/metadata_tagger.py   — tag with company/ticker/year/section/chunk_type/chunk_id
 ingestion/parent_linker.py     — link adjacent prose↔table chunk pairs
 ingestion/embed_and_store.py   — embed (all-mpnet-base-v2) → store in ChromaDB
 ```
+
+> **Why Docling?** Docling's built-in table structure detection produces well-formed markdown tables from 10-K financial statements — a critical quality advantage over character-based extraction. Each PDF is converted in its own process to avoid memory accumulation across files.
 
 ### Phase 2 — Query (every user question)
 ```
@@ -121,10 +126,9 @@ Supported operations: `percent_change`, `difference`, `sum`, `average`, `ratio`,
 
 | Layer | Technology |
 |---|---|
-| PDF Parsing | PyMuPDF (`fitz`) |
-| Text Extraction | Custom Python (`text_extractor.py`) |
-| Section Detection | Custom Python regex (SEC Item boundaries) |
-| Chunking | LangChain `RecursiveCharacterTextSplitter` + custom table chunker |
+| PDF → Markdown | **Docling** (`text_extractor.py`) — table structure detection on, OCR off |
+| Section Detection | Custom Python regex (SEC Item boundaries) via `ingestion/line_classifier.py` |
+| Chunking | LangChain `RecursiveCharacterTextSplitter` (prose) + custom row-aware chunker (tables) |
 | Embeddings | `sentence-transformers/all-mpnet-base-v2` via `langchain-huggingface` |
 | Vector Store | ChromaDB via `langchain-chroma` |
 | LLM | NVIDIA NIM API (`langchain-nvidia-ai-endpoints`) |
@@ -161,12 +165,12 @@ RAG_Project/
 │   ├── embed_and_store.py     # Embed all chunks and populate ChromaDB
 │   └── embedding_check.py     # One-off sanity check for embedding model
 │
-├── extracted_text/            # Pre-extracted markdown text (one file per company)
+├── extracted_text/            # Docling-extracted markdown (one .md per company PDF)
 ├── chroma_db/                 # Persistent ChromaDB store (3,063 chunks, 9 companies)
 │
 ├── test_pipeline.py           # Manual-chain + full-graph integration tests
 ├── test_setup.py              # Environment setup verification
-├── text_extractor.py          # PDF → markdown extraction script
+├── text_extractor.py          # PDF → markdown via Docling (run once per PDF)
 └── inspect_extract.py         # Extraction inspection utility
 ```
 
@@ -192,6 +196,8 @@ source venv/bin/activate        # Mac/Linux
 ```bash
 pip install -r requirements.txt
 ```
+
+> **Note on Docling:** `text_extractor.py` requires Docling (`pip install docling`). PDF extraction is a one-time step — the `extracted_text/*.md` files are already committed to the repo, so you do **not** need to re-run extraction unless you add new PDFs.
 
 ### 4. Set up environment variables
 Create a `.env` file in the project root (never commit this):
@@ -340,7 +346,7 @@ All tunable parameters live in `config.py`. Change values there, nowhere else.
 | LLM prompt engineering | 7 distinct prompts with defensive output parsing |
 | Vector database design | ChromaDB with metadata filtering, multi-company retrieval strategy |
 | Embedding model selection | Local sentence-transformers, chunk/model token alignment |
-| PDF processing at scale | PyMuPDF + custom section detection across 9 large documents |
+| PDF processing at scale | **Docling** for structured PDF→markdown conversion across 9 large 10-K filings |
 | Financial domain knowledge | SEC 10-K structure, Item numbers, table-aware chunking |
 | Failure mode awareness | Grading, rewriting, hallucination detection, honest failure messages |
 | Model cost optimisation | 8B for classification tasks, 70B for generation only |

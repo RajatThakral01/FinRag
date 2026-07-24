@@ -960,6 +960,10 @@ Run two independent retrieval methods per query, then merge their rankings — t
 - Consider whether the same RRF final-k values (4/5 per company) are still right once retrieval quality improves, or whether they can be reduced now that relevant chunks are more reliably surfaced — not decided, worth revisiting only after real evidence from the above re-test.
 - Once Hybrid Search is implemented and validated, Bugs A and B's prompt-level fixes (Ch 16.3, 16.7) should be re-tested *together with* the new retrieval path, not in isolation — a prompt fix validated against vector-only retrieval may behave differently once the candidate chunk set itself changes.
 
+## 21.6 Implementation Correction — Tokenizer Abbreviation Normalization
+
+**[AS-BUILT correction, found during real implementation]** The original plan (21.4) described a simple tokenizer (lowercase → strip punctuation → split). Real testing showed this is insufficient: `re.sub(r"[^\w\s]", " ", ...)` strips `&`, so `"R&D"` tokenizes to `['r', 'd']` — two single-character tokens with near-zero BM25 IDF weight — while the corpus tables spell it out as `"Research and development"` → `['research', 'and', 'development']`. Zero overlap; the target chunk scores near-zero. The same bug applies to SG&A (`['sg', 'a']` vs `['selling', 'general', 'and', 'administrative']`). Fix applied: financial abbreviations are expanded to their spelled-out forms **before** punctuation stripping, using a priority-ordered substitution list (`R&D` → `research and development`, `SG&A` → `selling general and administrative`, then a generic `&amp;`/`&` → `and` fallback), applied identically at both corpus-build time and query time. This is a vocabulary normalization, not a query-rewriting hack — the BM25 IDF is computed over the expanded tokens, which is the correct behavior. After this fix and a full index rebuild, `aapl_2024_item8_table_085_000` (Apple's Item 8 R&D row, $31,370M) ranked **Rank 3** for the query "R&D expenses" and the Tesla SG&A income-statement chunk ranked **Rank 5** for "SG&A expenses" — both previously invisible to BM25.
+
 
 End of Document — v3.0
 
