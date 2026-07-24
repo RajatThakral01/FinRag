@@ -1,24 +1,27 @@
 
 
-**PRODUCT REQUIREMENTS DOCUMENT — v2.0**
+**PRODUCT REQUIREMENTS DOCUMENT — v3.0**
 # Financial Intelligence RAG System
 ### Multi-Company 10-K Analysis · Adaptive RAG · LangGraph
 ****
 **Updated with: Chunking Strategy · Environment Setup · Multi-Company Queries**
 **LLM Output Parsing · NIM Model Selection · ChromaDB Filtering Design**
 **PDF Naming Convention · Retry Behavior · Test Questions · UI Design**
+**v3: As-Built Corrections · Retrieval-Completeness Bug Fixes · Hybrid (BM25+Vector) Search Plan**
 
+> **A note on how to read this v3.0 update:** Sections marked **[AS-BUILT]** describe what the real codebase actually does today, confirmed against real code/output, and take precedence over any conflicting text elsewhere in this document. Sections marked **[PLANNED — NOT YET IMPLEMENTED]** describe confirmed direction that has been discussed and decided but has zero code written/run yet. Original v2.0 text that has been superseded is struck through in intent (kept in the doc for history) with a correction directly beneath it.
 
 
 
 | Field | Detail |
 | --- | --- |
 | Project Name | Financial Intelligence RAG System |
-| Version | 2.0 (updated) |
-| Status | Pre-Development — Ready to Build |
-| Data | 2024 Annual 10-K Reports — 10 Companies |
+| Version | 3.0 (as-built corrections + hybrid search plan) |
+| Status | In Development — Phases 0–5 done & validated, Phase 6 in progress (fixes written, re-test pending), Phase 7 partially validated, Phase 8 not started |
+| Data | 2024 Annual 10-K Reports — **9 Companies** (Intel removed — see Ch 01) |
 | Author | Rajat Thakral |
 | Changes from v1 | Chunking strategy, LangChain scope, environment setup, multi-company handling, NIM model selection, output parsing, PDF naming, retry UX, test questions, UI design |
+| Changes from v2 | Removed Intel (9 companies, not 10); corrected actual file structure (`RAG_Project/`, not `financial-rag/`); corrected actual config attribute names and model assignments; corrected `grounded` field to string values `"grounded"`/`"not_grounded"`; documented Calculator's real two-step (LLM-extract + Python-compute) design and its 7 operations; documented 2 extra plumbing nodes not in the original node table; documented Grade-prompt per-company-completeness fix and Calculator operation/consolidated-figure fixes (Bugs A & B — fixes written, not yet re-validated); added Chapter 21 — Hybrid (BM25 + Vector) Search, a confirmed but unimplemented plan, since real-evidence testing showed the root cause of retrieval misses is **vector-search-only retrieval**, not the prompts (prompt fixes for Bugs A/B alone do not resolve this) |
 
 
 
@@ -67,12 +70,15 @@
 
   Chapter 20  —  Resume & Portfolio Value
 
+  Chapter 21  —  Hybrid Search: BM25 + Vector (RRF) — NEW in v3, CONFIRMED PLAN, NOT YET IMPLEMENTED
+
 
 
 # Chapter 01 — Project Overview
 
-This system is a production-grade Retrieval-Augmented Generation (RAG) pipeline built on 2024 Annual Report (10-K) filings from 10 major technology companies. Users ask natural language questions about financial data and receive accurate, grounded, verifiable answers. The pipeline goes beyond basic RAG with relevance grading, query rewriting, hallucination detection, and intelligent routing.
+This system is a production-grade Retrieval-Augmented Generation (RAG) pipeline built on 2024 Annual Report (10-K) filings from ~~10~~ **9 major technology companies**. Users ask natural language questions about financial data and receive accurate, grounded, verifiable answers. The pipeline goes beyond basic RAG with relevance grading, query rewriting, hallucination detection, and intelligent routing.
 
+**[AS-BUILT — v3]** Intel was removed from scope per an earlier confirmed decision. The company list below is the real, current 9-company list. Every other chapter's references to "10 companies" (Ch 04.2 requirements assumptions, Ch 07 PDF naming, Ch 08–09 filtering/multi-company math, Ch 16.2 extractor prompt, Ch 17 top-K notes) should be read as 9, not 10 — see the corrected tables in those chapters below.
 
 | # | Company | Ticker | Sector |
 | --- | --- | --- | --- |
@@ -85,7 +91,8 @@ This system is a production-grade Retrieval-Augmented Generation (RAG) pipeline 
 | 7 | Alphabet Inc. | GOOGL | Search / Cloud / Advertising |
 | 8 | Netflix Inc. | NFLX | Streaming / Content |
 | 9 | Adobe Inc. | ADBE | Creative / Document Software |
-| 10 | Intel Corporation | INTC | Semiconductors / PC Hardware |
+
+~~10 | Intel Corporation | INTC | Semiconductors / PC Hardware~~ — **removed from scope, not built.**
 
 
 
@@ -183,6 +190,9 @@ Existing LLM solutions have two critical failure modes:
     # Utilities
     python-dotenv==1.0.0
     tiktoken==0.7.0               # token counting for chunk size
+    
+    # [PLANNED — NOT YET IMPLEMENTED, v3] Hybrid search
+    rank_bm25                     # BM25Okapi sparse retrieval — see Chapter 21
 
 ## 4.3 .env File
 
@@ -195,6 +205,8 @@ Create a .env file in the project root. Never commit this to GitHub.
 
 Central config file that all modules import from. Change values here, nowhere else.
 
+**[AS-BUILT — v3]** The block below is the *real* current `config.py`, confirmed against the actual file — not the original v2.0 draft. Two attribute names differ from earlier PRD chapters (see the mismatch table right after), and the Grader model is actually the 70B model despite an inline comment still saying "fast, cheap" (the comment is stale — it was upgraded from 8B at some point and never updated). Always code against the attribute names in this block.
+
     from dotenv import load_dotenv
     import os
     load_dotenv()
@@ -205,17 +217,29 @@ Central config file that all modules import from. Change values here, nowhere el
     EMBEDDING_MODEL    = "sentence-transformers/all-mpnet-base-v2"
     CHUNK_SIZE         = 450   # tokens
     CHUNK_OVERLAP      = 50    # tokens
-    TOP_K              = 5     # chunks to retrieve
-    MAX_RETRY          = 3     # max rewrite retries
+    TOP_K              = 5     # chunks to retrieve (single-company)
+    MAX_RETRY          = 3     # max rewrite/hallucination retries
     CHROMA_PATH        = "./chroma_db"
     COLLECTION_NAME    = "financial_10k"
     
-    # Model per node (see Chapter 13)
-    MODEL_ROUTER       = "meta/llama-3.1-8b-instruct"   # fast, cheap
-    MODEL_GRADER       = "meta/llama-3.1-8b-instruct"   # fast, cheap
-    MODEL_GENERATOR    = "meta/llama-3.1-70b-instruct"  # powerful
-    MODEL_HALLUC       = "meta/llama-3.1-8b-instruct"   # fast, cheap
-    MODEL_REWRITE      = "meta/llama-3.1-8b-instruct"   # fast, cheap
+    # Model per node (see Chapter 13) — real attribute names, confirmed
+    MODEL_ROUTER       = "meta/llama-3.1-8b-instruct"
+    MODEL_GRADER       = "meta/llama-3.1-70b-instruct"   # NOTE: stale comment elsewhere says "fast, cheap" — this is actually the 70B model
+    MODEL_GENERATOR    = "meta/llama-3.1-70b-instruct"   # NOT "MODEL_GENERATE" — see mismatch table below
+    MODEL_HALLUC       = "meta/llama-3.1-8b-instruct"    # NOT "MODEL_HALLUCINATION" — see mismatch table below
+    MODEL_REWRITE      = "meta/llama-3.1-8b-instruct"
+    
+    # [PLANNED — NOT YET IMPLEMENTED, v3] add for Hybrid Search (Chapter 21):
+    # BM25_INDEX_PATH  = "./bm25_index.pkl"
+
+**Attribute-naming mismatch — already caused two `AttributeError` bugs, do not reintroduce:**
+
+| Earlier PRD chapters call it | Real `config.py` attribute |
+| --- | --- |
+| `MODEL_GENERATE` | `MODEL_GENERATOR` |
+| `MODEL_HALLUCINATION` | `MODEL_HALLUC` |
+
+**Multi-company retrieval breadth — also corrected from v2.0's original value:** the `["all"]` (cross-company) branch was originally `k=2` chunks/company (Ch 09.2 below). Real-evidence testing (Chapter 19 / Chapter 21) showed this was too narrow to reliably surface a specific line item across 9 differently-formatted 10-Ks, so it was bumped to **`k=4` chunks/company** (36 total for a 9-company query, not 18). This is a real, accepted cost/latency tradeoff, not a free fix — see Chapter 21 for how Hybrid Search interacts with this same final-k value.
 
 
 # Chapter 05 — System Architecture
@@ -256,14 +280,18 @@ Central config file that all modules import from. Change values here, nowhere el
         rewritten_question:   str            # reformulated if retrieval failed
         route:                str            # retrieve / calculate / direct
         companies_mentioned:  List[str]      # extracted company names
-        retrieved_chunks:     List[str]      # raw chunks from ChromaDB
+        retrieved_chunks:     List[str]      # raw chunks from ChromaDB (from vector search today; from hybrid vector+BM25 once Ch 21 ships)
         chunk_sources:        List[dict]     # metadata for each chunk
         relevant:             str            # yes / no from Grade node
         answer:               str            # generated answer
-        grounded:             str            # yes / no from Hallucination
+        grounded:             str            # "grounded" / "not_grounded" from Hallucination — NOT "yes"/"no", see correction below
         retry_count:          int            # prevent infinite loops
         final_answer:         str            # cleaned final output
         error_message:        Optional[str]  # set if system gives up
+
+**[AS-BUILT — v3] `grounded` field correction:** this chapter and Chapter 10.1's edge table originally specified `yes`/`no` for the `grounded` field. The actual Hallucination Check prompt (Ch 16.6) and its parser (Ch 11.2) both specify `"grounded"`/`"not_grounded"` string values instead — that was treated as the authoritative pair (prompt/parser over this chapter's stale text), and the real code's edge functions all check `== "grounded"`, never `== "yes"`. See Ch 10.1 for the corrected edge table.
+
+**[AS-BUILT — v3] Two extra nodes not shown in the Ch 10 node table:** `grade_exhausted_warning_node` and `hallucination_exhausted_node` also exist in the real graph. LangGraph conditional edge functions can only route to the next node — they cannot write to state — so each "retries exhausted" behavior in Ch 12.1 needed its own tiny node to actually write the warning/failure message into state before continuing. These are plumbing, not a design change to the retry logic itself.
 
 
 # Chapter 06 — Data & Ingestion — Updated Chunking Strategy
@@ -364,7 +392,8 @@ The ingestion script maps filename to company name and ticker automatically. All
 | alphabet_10k_2024.pdf | Alphabet Inc. | GOOGL |
 | netflix_10k_2024.pdf | Netflix Inc. | NFLX |
 | adobe_10k_2024.pdf | Adobe Inc. | ADBE |
-| intel_10k_2024.pdf | Intel Corporation | INTC |
+
+~~intel_10k_2024.pdf | Intel Corporation | INTC~~ — **[AS-BUILT — v3] Intel removed from scope, this file is not ingested.**
 
 
 
@@ -436,11 +465,15 @@ Before retrieval, a company extractor identifies which companies the question is
 
 ## 9.2 The "all" Case — Cross-Company Questions
 
-When the question asks across all companies (e.g. "Which company had the highest revenue?"), you cannot retrieve from just one company. Strategy:
+When the question asks across all companies (e.g. "Which company had the highest revenue?"), you cannot retrieve from just one company. Strategy (original v2.0 draft):
 
-- Retrieve top-2 chunks from each of the 10 companies = 20 chunks total
-- This keeps total tokens manageable (20 × 450 = 9000 tokens)
-- Pass all 20 chunks to Generator with clear company labels in context
+- ~~Retrieve top-2 chunks from each of the 10 companies = 20 chunks total~~
+- ~~This keeps total tokens manageable (20 × 450 = 9000 tokens)~~
+- Pass all chunks to Generator with clear company labels in context
+
+**[AS-BUILT — v3] Corrected real values:** it's **9 companies, top-4 chunks each = 36 chunks total** (not 10 companies / top-2 / 20). The bump from `k=2` to `k=4` per company was a deliberate fix (Bug A, Chapter 19) after real-evidence testing showed 2 chunks/company was too narrow to reliably surface one specific line item (e.g. R&D total) across 9 differently-formatted 10-Ks — narrative MD&A paragraphs mentioning a metric kept out-ranking the actual numeric table containing it, purely because vector search has no way to prefer a chunk for being *literally about* the right metric rather than just semantically close to it.
+
+**This is a retrieval-quality problem, not a prompt problem.** The Grade-prompt rewrite (per-company completeness rule, Ch 16.3) was necessary but not sufficient — it can only judge relevance among whatever chunks retrieval actually hands it. If the correct chunk was never retrieved, no prompt fix downstream can recover it. **Chapter 21 (Hybrid Search — BM25 + Vector, confirmed plan, not yet implemented)** is the fix aimed directly at this root cause, and is expected to run alongside — not replace — the `k=4`/company breadth increase above.
 
 ## 9.3 Context Structuring for Multi-Company Answers
 
@@ -460,7 +493,9 @@ When passing multi-company chunks to the Generator, structure the context clearl
 | --- | --- | --- | --- |
 | Single company | ["Apple"] | Filter by company = Apple, top-5 | 5 |
 | Two companies | ["Apple","Microsoft"] | Separate retrieval per company, top-4 each | 8 |
-| All companies | ["all"] | Top-2 per company × 10 companies | 20 |
+| All companies | ["all"] | Top-4 per company × **9** companies **[corrected — was top-2 × 10]** | **36 [corrected — was 20]** |
+
+**[PLANNED — v3, Chapter 21]** Once Hybrid Search ships, "Retrieval Strategy" for every row above becomes "vector search + BM25 search per company, RRF-merged" instead of vector search alone. The final chunk counts in the rightmost column (5 / 4-each / 4-each) are not expected to change as part of that work — only *which* chunks fill those slots.
 
 
 
@@ -470,29 +505,36 @@ When passing multi-company chunks to the Generator, structure the context clearl
 | Node | Input from State | Output to State | LLM Call | Model |
 | --- | --- | --- | --- | --- |
 | Router | question | route, companies_mentioned | Yes | 8B (fast) |
-| Retrieve | question/rewritten_question, companies_mentioned | retrieved_chunks, chunk_sources | No (vector search) | — |
-| Grade | question, retrieved_chunks | relevant (yes/no) | Yes | 8B (fast) |
+| Retrieve | question/rewritten_question, companies_mentioned | retrieved_chunks, chunk_sources | No (vector search today — see Ch 21 for planned hybrid vector+BM25) | — |
+| Grade | question, retrieved_chunks, ~~companies_mentioned resolved to full names~~ **[AS-BUILT: now also takes companies list — Ch 16.3]** | relevant (yes/no) | Yes | ~~8B~~ **70B, see Ch 04.4 note** |
 | Rewrite | question, retry_count | rewritten_question, retry_count+1 | Yes | 8B (fast) |
 | Generate | question, retrieved_chunks, chunk_sources | answer | Yes | 70B (powerful) |
-| Hallucination Check | answer, retrieved_chunks | grounded (yes/no) | Yes | 8B (fast) |
-| Calculator | retrieved_chunks (numbers extracted) | answer (computed result) | No (Python math) | — |
-| Direct Answer | question | answer | Yes | 70B |
+| Hallucination Check | answer, retrieved_chunks | grounded (**"grounded"/"not_grounded"**, not yes/no) | Yes | 8B (fast) |
+| Calculator | retrieved_chunks | answer (computed result) | **[AS-BUILT] Yes — two-step: LLM extracts `{operation, values}` JSON, then Python `tools/calculator.py::compute()` does the arithmetic. See correction below — v2.0 claimed "no LLM call," that was never buildable as written.** | LLM step uses same model as Generator; math step is pure Python |
+| Direct Answer | question | answer, final_answer | Yes | 70B |
+
+**[AS-BUILT — v3] Direct Answer route correction:** Direct Answer sets `final_answer` directly inside its own node and **skips Hallucination Check entirely** — there's no `retrieved_chunks` for this route (no document was retrieved), so there is nothing to check groundedness against. The original table above didn't make this explicit.
+
+**[AS-BUILT — v3] Calculator design correction:** v2.0's Technology Stack framing implied Calculator needed no LLM call at all. That's not buildable as written — there is no mechanism for turning unstructured chunk text into clean numbers without one. The real, deliberately-discussed design is two-step: an LLM extraction call produces `{operation, values}` as JSON, then pure Python performs the actual arithmetic (never the LLM). Calculator's answer also **does** go through Hallucination Check afterward (same as Generate) — confirmed explicitly, since the extraction step can still hallucinate a number not actually present in the chunks. Operations were also expanded to **7**, beyond whatever v2.0 implied: `percent_change`, `difference`, `sum`, `average`, `ratio`, `margin`, `max`, `min` — `margin`/`max`/`min` were added after confirming the Ch 15 test list ("highest gross margin?") needed them.
 
 
 
 ## 10.1 Conditional Edge Logic
 
+**[AS-BUILT — v3]** Every `grounded`/`not_grounded` row below is corrected from the original `yes`/`no` wording (see Ch 5.2 correction) — the real edge functions check `== "grounded"`, never `== "yes"`. The `relevant` field genuinely does use `yes`/`no`, unchanged.
+
 | From Node | Condition | Next Node |
 | --- | --- | --- |
 | Router | route == "retrieve" or "calculate" | Retrieve |
 | Router | route == "direct" | Direct Answer |
+| Calculate route | ~~skips Grade~~ **[AS-BUILT] still goes through Grade before Calculator — confirmed, deliberate, unchanged from a "calculate should skip grading" alternative that was considered and rejected]** | Grade |
 | Grade | relevant == "yes" | Generate |
 | Grade | relevant == "no" AND retry_count < MAX_RETRY | Rewrite |
-| Grade | relevant == "no" AND retry_count >= MAX_RETRY | Generate (with warning in state) |
+| Grade | relevant == "no" AND retry_count >= MAX_RETRY | grade_exhausted_warning_node **[AS-BUILT: extra plumbing node, see Ch 5.2]** → Generate (with warning in state) |
 | Rewrite | always | Retrieve |
-| Hallucination Check | grounded == "yes" | END |
-| Hallucination Check | grounded == "no" AND retry_count < MAX_RETRY | Generate |
-| Hallucination Check | grounded == "no" AND retry_count >= MAX_RETRY | END (flag to user) |
+| Hallucination Check | grounded == ~~"yes"~~ **"grounded"** | END |
+| Hallucination Check | grounded == ~~"no"~~ **"not_grounded"** AND retry_count < MAX_RETRY | Generate |
+| Hallucination Check | grounded == ~~"no"~~ **"not_grounded"** AND retry_count >= MAX_RETRY | hallucination_exhausted_node **[AS-BUILT: extra plumbing node]** → END (flag to user) |
 
 
 
@@ -597,51 +639,39 @@ Not every node needs the same model. Router, Grader, Rewrite, and Hallucination 
 
 # Chapter 14 — Project File Structure
 
-    financial-rag/
-    │
-    ├── data/
-    │   └── pdfs/                       # 10 raw 10-K PDFs (naming: company_10k_2024.pdf)
-    │
-    ├── ingestion/
-    │   ├── pdf_loader.py               # PyMuPDF text extraction per page
-    │   ├── section_detector.py          # SEC Item regex detection
-    │   ├── table_detector.py            # Identify table vs prose blocks
-    │   ├── chunker_prose.py             # LangChain RecursiveCharacterTextSplitter
-    │   ├── chunker_table.py             # Custom table-aware chunker
-    │   ├── metadata_tagger.py           # Add company/section metadata
-    │   └── ingest.py                   # Main script — run once to build ChromaDB
-    │
-    ├── retrieval/
-    │   ├── embedder.py                 # Load all-mpnet-base-v2 via LangChain
-    │   ├── retriever.py                # ChromaDB query with metadata filter
-    │   └── company_extractor.py         # Extract company names from question
-    │
+**[AS-BUILT — v3]** This chapter originally described a `financial-rag/` layout with separate `ingestion/`, `retrieval/`, and `prompts/` directories. The real project root is **`RAG_Project/`**, and it never split into those directories — ingestion, prompts, and retrieval logic live inside `graph/nodes.py` and `tools/`, not standalone modules. The tree below is the real, confirmed structure.
+
+    RAG_Project/                     <- project root, ALWAYS run scripts from here
+    ├── config.py
+    ├── test_pipeline.py             <- manual-chain + full-graph tests
+    ├── test_multicompany.py         <- diagnostic script, prints raw chunks + raw LLM extraction JSON
     ├── graph/
-    │   ├── state.py                    # GraphState TypedDict
-    │   ├── nodes.py                    # All node functions
-    │   ├── edges.py                    # Conditional edge functions
-    │   └── graph.py                    # Compile LangGraph and run
-    │
-    ├── prompts/
-    │   ├── router_prompt.py
-    │   ├── grade_prompt.py
-    │   ├── rewrite_prompt.py
-    │   ├── generate_prompt.py
-    │   └── hallucination_prompt.py
-    │
-    ├── tools/
-    │   ├── calculator.py               # Deterministic Python math
-    │   └── output_parsers.py           # parse_grade, parse_route, etc.
-    │
-    ├── chroma_db/                      # Auto-created on first ingest
-    ├── app.py                          # Streamlit UI
-    ├── config.py                       # All configuration
-    ├── .env                            # API keys (never commit)
-    ├── .gitignore                      # include: .env, chroma_db/, venv/
-    └── requirements.txt
+    │   ├── state.py                 <- GraphState TypedDict, create_initial_state()
+    │   ├── nodes.py                 <- ALL node functions (router, retrieve, grade, rewrite,
+    │   │                                generate, hallucination check, calculator, direct answer,
+    │   │                                grade_exhausted_warning_node, hallucination_exhausted_node)
+    │   ├── edges.py                 <- conditional edge functions
+    │   └── graph.py                 <- build_graph(), run_query()
+    └── tools/
+        ├── output_parsers.py        <- parse_route, parse_companies, parse_grade,
+        │                                parse_hallucination, parse_calculation
+        ├── calculator.py            <- compute()
+        ├── vectorstore.py           <- get_vectorstore()
+        └── company_names.py        <- SHORT_TO_FULL, get_all_full_names()
+    
+    [PLANNED — NOT YET IMPLEMENTED, v3 — Chapter 21]
+    └── tools/
+        └── bm25_index.py            <- pulls docs from Chroma .get(), builds/caches
+                                         BM25Okapi index, returns ranked BM25 results
+
+**Known import gotcha (real, confirmed):** scripts must be run from `RAG_Project/` root (e.g. `python -u test_pipeline.py`), never from inside `graph/`. Running from inside `graph/` causes Python to resolve `graph.state` against the sibling file `graph/graph.py` instead of the package, throwing `'graph' is not a package`. All internal imports are absolute from root (`from graph.state import ...`, `from tools.calculator import ...`).
+
+Note the original `data/pdfs/`, `chroma_db/`, `app.py`, `.env`, `.gitignore`, and `requirements.txt` items from v2.0 are still expected at the project root once ingestion and the UI phase are complete — only the *code layout* above has been corrected; ingestion outputs and top-level config/env files are unaffected by this correction.
 
 
 # Chapter 15 — Development Phases & Test Questions
+
+**[AS-BUILT — v3] Real status as of this update:** Phases 0–5 are done and validated with real evidence (see Chapter 6 of the handoff doc for specifics — single-company retrieve/calculate, hallucination discrimination, full graph routing, both retry-exhaustion paths, and two-company retrieve/calculate are all confirmed working). **Phase 6 (Multi-Company) is in progress** — Bugs A and B below were found via real testing, fixes have been written for both, but neither has been re-run yet (see Chapter 19). Phase 7 (Calculator) is validated for single-company only; its multi-company issues are the same Bug B. **Phase 8 (Streamlit UI) has not been started at all.**
 
 | Phase | Build | Test Questions to Verify |
 | --- | --- | --- |
@@ -688,9 +718,11 @@ UI | Streamlit interface with source display | Full demo: ask 5 questions, verif
 
     System: Extract company names from the question. Return ONLY a JSON array
     containing names from: Apple, Microsoft, Amazon, NVIDIA, Tesla, Meta,
-    Alphabet, Netflix, Adobe, Intel.
+    Alphabet, Netflix, Adobe.
     If no specific company is mentioned, return ["all"].
     Return JSON array only. No other text.
+
+**[AS-BUILT — v3]** Intel dropped from the allowed-names list (9 companies, not 10).
     
     Human: {question}
 
@@ -705,6 +737,26 @@ UI | Streamlit interface with source display | Full demo: ask 5 questions, verif
     
     Human: Question: {question}
     Chunks: {chunks}
+
+**[AS-BUILT — v3, Bug A fix — written, NOT yet re-validated with real output]** The prompt above graded the whole chunk batch as one yes/no, so a multi-company question could pass Grade even when several companies had zero usable data (real symptom: a 9-company R&D question silently dropped 3 companies, and every remaining number was individually real, so this bug is structurally invisible to Hallucination Check — it's a completeness failure, not a grounding failure). Real, corrected prompt:
+
+    System: You are a relevance grader for financial documents.
+    Given a question, a list of companies the question requires data for,
+    and retrieved document chunks, decide if the chunks contain sufficient
+    information to answer the question for EVERY listed company — not most
+    of them. Reason company-by-company before your final line, then return
+    ONLY "yes" or "no" as the last line.
+    "yes" = the specific figure is present for every listed company
+    "no"  = one or more listed companies are missing the needed figure,
+            or chunks are about the wrong topic
+    
+    Human: Question: {question}
+    Companies required: {companies}
+    Chunks: {chunks}
+
+`grade_node` was updated to resolve `state["companies_mentioned"]` into full company names (via `SHORT_TO_FULL` / `get_all_full_names()`) and pass them into the prompt as `{companies}`. Still needs a real re-run of the "highest R&D spend" test case (Ch 15, Phase 6) before this is considered closed — see Chapter 19.
+
+**Important root-cause note (v3):** this prompt fix is necessary but cannot, by itself, guarantee full coverage — Grade can only judge relevance among whatever chunks Retrieve actually handed it. If a company's real figure was never retrieved in the first place (the actual failure mode observed — see Ch 21), no amount of grading logic recovers it. The retrieval-side fix (breadth `k=2→4`, Ch 09.2) and the planned Hybrid Search (Ch 21) are what address that half of the problem.
 
 ## 16.4 Rewrite Prompt
 
@@ -742,6 +794,18 @@ UI | Streamlit interface with source display | Full demo: ask 5 questions, verif
     Human: Answer: {answer}
     Source chunks: {chunks}
 
+## 16.7 Calculator Extraction Prompt — [AS-BUILT, NEW in v3]
+
+Not present in v2.0, since v2.0 assumed Calculator needed no LLM call (corrected in Ch 10). This prompt turns unstructured chunk text into `{operation, values}` JSON for `tools/calculator.py::compute()` to do the actual arithmetic on.
+
+**Bug B fix — written, NOT yet re-validated with real output.** Symptom: comparing Tesla vs. NVIDIA gross margins crashed once (`Cannot compute margin with a base of 0`) and, on a debug re-run, computed a meaningless ratio-of-two-percentages instead of the point gap, while also using Tesla's unlabeled automotive-*segment* margin (16.9%) instead of its consolidated company-wide margin (~17.87%, computable from Tesla's own "Total gross profit" / "Total revenues"). Root cause: the extraction prompt had no rule distinguishing "compare two percentages" from "compare two dollar amounts," and no preference for consolidated/total figures over segment-level ones when a company reports both. Real, corrected prompt logic includes:
+
+- **Operation-selection rule:** percentage-vs-percentage comparisons must use `difference` (the point gap), never `ratio`.
+- **Consolidated-figure rule:** when a company reports multiple segment margins instead of one total, prefer the consolidated total (computing via `margin` from stated total revenue/total cost if needed) over any single segment's percentage.
+- **Missing-company rule (from Bug A's downstream fix):** if a company's figure genuinely isn't in the retrieved chunks even after the retrieval-breadth fix, extraction should emit a placeholder (`value: 0`, label ending `" (not found in retrieved chunks)"`) instead of silently dropping it. `calculator_node` was updated to exclude these placeholders from `max`/`min` computation (so a `0` never wins by default) while still surfacing them in the final answer text as an explicit caveat.
+
+Still needs a real re-run of the Tesla/NVIDIA margin comparison (Ch 15, Phase 6/7 test list) confirming `difference` is chosen and Tesla's consolidated ~17.87% is used — see Chapter 19.
+
 
 # Chapter 17 — Configuration
 
@@ -751,16 +815,17 @@ UI | Streamlit interface with source display | Full demo: ask 5 questions, verif
 | Chunk size (prose) | 450 tokens | Safely under 512 token model limit |
 | Chunk size (tables) | 450 tokens max, row-aware | Never split mid-row |
 | Chunk overlap | 50 tokens | Prose only — tables use no overlap |
-| Top-K retrieval | 5 (single), 4 per company (multi) | Multi-company: 4×2=8 or 2×10=20 |
+| Top-K retrieval | 5 (single), 4 per company (two-company or all-9) | **[AS-BUILT — v3 correction]** all-companies case is 4×9=36, not 4×2=8 or 2×10=20 — see Ch 09.2 |
 | Max retries | 3 | Shared across rewrite and hallucination cycles |
 | Model — Router | meta/llama-3.1-8b-instruct | Fast, cheap — simple classification |
-| Model — Grader | meta/llama-3.1-8b-instruct | Fast, cheap — binary output |
+| Model — Grader | ~~meta/llama-3.1-8b-instruct~~ **meta/llama-3.1-70b-instruct** | **[AS-BUILT — v3]** Real config uses the 70B model here; the "fast, cheap" rationale in this row is stale — see Ch 04.4 |
 | Model — Generator | meta/llama-3.1-70b-instruct | Powerful — main answer quality |
 | Model — Hallucination | meta/llama-3.1-8b-instruct | Fast, cheap — verification task |
 | Model — Rewrite | meta/llama-3.1-8b-instruct | Fast, cheap — rephrasing task |
 | LLM temperature | 0.0 for all nodes | Deterministic — no creativity in factual Q&A |
 | ChromaDB path | ./chroma_db/ | Local persistent directory |
 | Collection name | financial_10k | Single collection, all companies |
+| **[PLANNED v3]** BM25 index path | ./bm25_index.pkl | Not yet implemented — see Chapter 21 |
 
 
 
@@ -827,6 +892,9 @@ When the system exhausts retries, show a clear and honest message — never show
 | Multi-company confusion | Numbers from one company appear in another company's answer | Company labels in context (=== APPLE ===). Hallucination check catches cross-company contamination. |
 | Infinite retry loops | Rewrite loop never finds relevant chunks | retry_count hard limit of 3. After limit: proceed with best available or return honest failure. |
 | LLM parse failures | Router returns unexpected text instead of route keyword | Defensive parsers with fallback values (default to "retrieve" for router, "no" for grader). |
+| **[REALIZED — v3] Grade uses "majority passes" instead of "all companies covered" (Bug A)** | Cross-company question (highest R&D spend, 9 companies) silently dropped 3 of 9 companies from the final answer, no indication given to the user. Every number in the wrong answer was individually real, extracted from actual chunks — so Hallucination Check correctly said "grounded" and would again. **This bug is structurally invisible to Hallucination Check**, since it's a completeness failure, not a grounding failure. | Grade prompt rewritten to require per-company reasoning against an explicit `{companies}` list (Ch 16.3); retrieval breadth for the `["all"]` branch bumped `k=2→4`/company (Ch 09.2); Calculator extraction given a missing-company placeholder rule (Ch 16.7). **Fix written, NOT yet re-validated with a real re-run.** |
+| **[REALIZED — v3] Calculator picks wrong operation / wrong figure for percentage comparisons (Bug B)** | Comparing Tesla vs. NVIDIA gross margins crashed once (`Cannot compute margin with a base of 0`); on re-run, computed a meaningless ratio of two percentages instead of the point gap, and used Tesla's unlabeled automotive-segment margin (16.9%) instead of its consolidated company-wide margin (~17.87%). | Extraction prompt given an explicit operation-selection rule (percentage-vs-percentage → `difference`, never `ratio`) and a consolidated-figure preference rule (Ch 16.7). **Fix written, NOT yet re-validated with a real re-run.** |
+| **[REALIZED — v3, root cause] Vector-search-only retrieval misses chunks that are topically adjacent but not the actual answer** | Narrative MD&A paragraphs mentioning a metric (e.g. "R&D expenses increased $2.3B") consistently out-scored the actual numeric table containing the metric's real total, for 6 of 9 companies on the R&D cross-company question — even after the `k=2→4` breadth fix and multiple rewrite attempts. Vector search has no notion of a chunk being *literally about* the right metric vs. merely *mentioning* it — this is the deeper cause underlying Bug A, and prompt-only fixes (Grade, Calculator) cannot resolve it since the correct chunk is sometimes never retrieved in the first place. | **[PLANNED — NOT YET IMPLEMENTED, v3]** Hybrid search: run vector search (existing) and BM25/sparse search (new) per query, merge rankings via Reciprocal Rank Fusion (RRF). See **Chapter 21** for the full confirmed plan, judgment calls, and file-level task list. |
 
 
 
@@ -849,7 +917,51 @@ When the system exhausts retries, show a clear and honest message — never show
 
 
 
-End of Document — v2.0
+# Chapter 21 — Hybrid Search: BM25 + Vector (RRF) — NEW in v3
+
+**Status: CONFIRMED PLAN. Zero code has been written or run for this yet.** Everything in this chapter is "agreed direction, next thing to build," not "already done." This chapter supersedes an earlier, simpler idea (naive keyword-overlap counting used to re-rank a wider vector-search candidate pool) that was designed and discussed in chat but never saved, tested, or applied — that approach should be considered abandoned, and this hybrid design replaces it entirely rather than adding to it.
+
+## 21.1 Why This Exists
+
+`retrieve_node` currently uses pure vector (embedding) similarity search only. Real-evidence testing (Ch 19, Bug A root-cause row) showed this misses relevant chunks even after retrieval breadth increased (2→4 chunks/company) and multiple rewrite attempts — specifically, narrative MD&A paragraphs about a metric kept out-scoring the actual numeric table containing that metric's total value, for 6 of 9 companies on the "highest R&D spend" cross-company question. Vector search has no way to specifically prefer a chunk because its content/table is *literally* about the right metric — it only knows semantic closeness. **This is the real root cause of Bug A** — updating the Grade and Calculator prompts (Ch 16.3, 16.7) was necessary but not sufficient, since those prompts can only work with whatever chunks retrieval actually surfaces.
+
+## 21.2 The Approach: Hybrid Search via Reciprocal Rank Fusion (RRF)
+
+Run two independent retrieval methods per query, then merge their rankings — this is the industry-standard pattern for combining semantic and keyword-based retrieval, not something specific to this project.
+
+- **Dense/vector search** (already built): good at semantic matches, synonyms, paraphrases.
+- **Sparse/BM25 search** (to be built): good at exact term matches, rewarding chunks where the query's important words are concentrated — adjusted for chunk length and how rare those words are across the whole corpus (inverse document frequency). This is exactly the "chunk is *about* R&D vs. chunk merely *mentions* R&D" distinction vector search is missing.
+
+**Merge method — Reciprocal Rank Fusion:**
+
+    RRF_score(chunk) = 1/(k + rank_in_vector_results) + 1/(k + rank_in_bm25_results)
+
+`k` conventionally = 60. RRF combines by *rank position*, not raw score — necessary because vector similarity (~0–1) and BM25 scores (unbounded, corpus-size-dependent) are on incomparable scales and can't be averaged directly. A chunk both methods rank highly gets a strong combined score; a chunk only one method surfaces still counts, just less.
+
+## 21.3 Confirmed Judgment Calls (do not re-litigate — deliberately decided)
+
+1. **Index scope: ONE global BM25 index across all 9 companies**, not 9 per-company indexes. BM25's IDF (word-rarity) statistic needs a reasonably large, varied corpus to be meaningful — computing "how rare is the word 'research'" against only one company's few hundred chunks is a much weaker statistical basis than computing it across the full 9-company collection. Filtering to a specific company happens *after* scoring, via metadata, mirroring how Chroma's `filter={"company": ...}` already works (Ch 08).
+2. **Caching: build once, cache to disk** (proposed path: `./bm25_index.pkl`, alongside `CHROMA_PATH` in `config.py`). Load from cache if present; do not rebuild every run. **Known limitation, accepted deliberately:** this will NOT automatically pick up newly-ingested chunks if the corpus grows later (e.g. adding a 10th company) — the cache file would need to be manually deleted to force a rebuild. Judged acceptable for a fixed 9-company portfolio project scope.
+3. **Corpus source: pull all documents directly out of Chroma** via its `.get()` method (returns the full stored collection without needing a similarity query), rather than rebuilding from the original ingestion script/raw source. This guarantees the BM25 index and the vector index describe exactly the same chunks, since both are sourced from the same already-ingested collection.
+
+## 21.4 What Needs to Be Built (not yet built — task list for next session)
+
+| File | Change | Status |
+| --- | --- | --- |
+| `tools/bm25_index.py` | **New file.** Pull all docs+metadata from Chroma via `.get()`; a simple tokenizer (lowercase, strip punctuation, split whitespace) applied consistently at index-build and query time; BM25 index construction via `rank_bm25`'s `BM25Okapi` class; disk caching (pickle) with load-if-exists/build-if-missing logic; a query function that scores the full corpus, filters to a given company via metadata, and returns a ranked list | Not started |
+| `graph/nodes.py` | `retrieve_node` rewritten to: run vector search (existing) AND BM25 search (new) per company branch, then RRF-merge the two rankings per company, then truncate to the existing final chunk counts (4/company for `["all"]` and multi-company branches, 5 for single-company — unchanged from current values, Ch 09.2/17) | Not started — **replaces** the current pure-vector-search body of `retrieve_node`, not additive |
+| `config.py` | One new line: `BM25_INDEX_PATH = "./bm25_index.pkl"` (or similar) | Not started |
+| Local environment | `pip install rank_bm25` in the project venv (Ch 04.2) | Not started |
+
+## 21.5 Open Items for Whoever Picks This Up Next
+
+- Confirm the exact shape of documents returned by Chroma's `.get()` (field names for text content vs. metadata) before writing `tools/bm25_index.py` — don't assume, verify against the real return value first, consistent with this project's established practice (Ch 8 of the handoff doc) of confirming real code/output before writing fixes.
+- After implementation, re-test using the same R&D cross-company question from Ch 19 (Bug A) as the validation case — that's the real-evidence benchmark this whole change exists to fix. Compare final per-company chunk coverage against the "only 3 of 9 companies had real totals" result already on record.
+- Consider whether the same RRF final-k values (4/5 per company) are still right once retrieval quality improves, or whether they can be reduced now that relevant chunks are more reliably surfaced — not decided, worth revisiting only after real evidence from the above re-test.
+- Once Hybrid Search is implemented and validated, Bugs A and B's prompt-level fixes (Ch 16.3, 16.7) should be re-tested *together with* the new retrieval path, not in isolation — a prompt fix validated against vector-only retrieval may behave differently once the candidate chunk set itself changes.
+
+
+End of Document — v3.0
 
 
 
