@@ -6,6 +6,7 @@ SHORT_TO_FULL = {
     "Tesla": "Tesla Inc.",
     "Meta": "Meta Platforms Inc.",
     "Alphabet": "Alphabet Inc.",
+    "Google": "Alphabet Inc.",   # alias — users commonly say Google instead of Alphabet
     "Netflix": "Netflix Inc.",
     "Adobe": "Adobe Inc.",
 }
