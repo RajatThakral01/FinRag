@@ -1,0 +1,101 @@
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
+
+from tools.session_store import create_session, list_sessions, get_session
+import sqlite3
+import config
+from graph.graph import run_session_query
+
+app = FastAPI(
+    title="Financial RAG API",
+    description="REST API for the Financial RAG pipeline",
+    version="1.0.0"
+)
+
+# CORS configuration
+# Pin to specific origin as per requirements (needs tightening before prod)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class SessionCreateRequest(BaseModel):
+    title: Optional[str] = None
+
+class QueryRequest(BaseModel):
+    question: str
+
+@app.get("/health")
+def health_check():
+    """Simple 200 OK endpoint to detect backend availability."""
+    return {"status": "ok"}
+
+@app.post("/sessions")
+def create_new_session(request: Optional[SessionCreateRequest] = None):
+    """Create a new session and return its ID."""
+    session_id = create_session()
+    # If the request contains a title, update it manually, otherwise it's auto-generated later
+    if request and request.title:
+        with sqlite3.connect(config.SESSION_DB_PATH, check_same_thread=False) as conn:
+            conn.execute("UPDATE sessions SET title = ? WHERE session_id = ?", (request.title, session_id))
+    
+    session_data = get_session(session_id)
+    return {
+        "session_id": session_id,
+        "created_at": session_data["created_at"]
+    }
+
+@app.get("/sessions")
+def get_all_sessions():
+    """List all sessions ordered by most recently active first."""
+    return list_sessions()
+
+@app.get("/sessions/{session_id}/turns")
+def get_session_turns(session_id: str):
+    """List all turns for a specific session."""
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found.")
+        
+    # Get all turns manually to avoid circular imports or exposing internal functions directly if not imported
+    with sqlite3.connect(config.SESSION_DB_PATH, check_same_thread=False) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT * FROM turns WHERE session_id = ? ORDER BY turn_number ASC", (session_id,)).fetchall()
+        
+    return [dict(r) for r in rows]
+
+@app.post("/sessions/{session_id}/query")
+def submit_query(session_id: str, request: QueryRequest):
+    """
+    Submit a query to a session. The graph uses session history to resolve the question context.
+    """
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found.")
+        
+    try:
+        final_state, resolved_question = run_session_query(session_id, request.question)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+        
+    # The boolean flag indicating whether the resolved question differs from the raw one
+    question_was_resolved = request.question.strip() != resolved_question.strip()
+    
+    return {
+        "raw_question": request.question,
+        "resolved_question": resolved_question,
+        "question_was_resolved": question_was_resolved,
+        "final_answer": final_state.get("final_answer", ""),
+        "cache_hit": final_state.get("cache_hit", False),
+        "chunk_sources": final_state.get("chunk_sources", []),
+        "error_message": final_state.get("error_message")
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)

@@ -11,6 +11,7 @@ from graph.state import create_initial_state, GraphState
 from tools.vectorstore import get_vectorstore
 from tools.company_names import SHORT_TO_FULL, get_all_full_names
 from tools.bm25_index import bm25_query
+from tools.retrieval_cache import get_cache, put_cache
 
 router_prompt = ChatPromptTemplate.from_messages([
     ("system",
@@ -123,7 +124,8 @@ generate_prompt = ChatPromptTemplate.from_messages([
      "information from your training data for specific numbers, dates, "
      "or financial figures. If the context does not contain enough "
      "information to answer fully, say so clearly rather than guessing. "
-     "Cite which company and section each figure comes from."),
+     "Cite which company and section each figure comes from."
+     "{conversation_context_text}"),
     ("human", "Question: {question}\nContext: {context}"),
 ])
 
@@ -132,11 +134,40 @@ def generate_node(state: GraphState) -> dict:
     question = state["rewritten_question"] or state["question"]
     context = _format_context(state["retrieved_chunks"], state["chunk_sources"])
 
+    conv_context = state.get("conversation_context")
+    if conv_context:
+        conv_text = (
+            "\n\nHere are the last few Q&A turns for conversational context "
+            "(use this to understand the flow and adopt a natural conversational "
+            "tone, but DO NOT use it for factual numbers — rely only on the "
+            "provided 10-K Context for facts):\n"
+            f"{conv_context}"
+        )
+    else:
+        conv_text = ""
+
     llm = ChatNVIDIA(model=config.MODEL_GENERATOR, temperature=0.0)
     chain = generate_prompt | llm
 
-    response = chain.invoke({"question": question, "context": context})
+    response = chain.invoke({
+        "question": question,
+        "context": context,
+        "conversation_context_text": conv_text
+    })
     answer = response.content.strip()
+
+    if not state.get("cache_hit") and state.get("relevant") == "yes":
+        vs = get_vectorstore()
+        emb = vs.embeddings.embed_query(question)
+        put_cache(
+            route=state["route"],
+            companies=state["companies_mentioned"],
+            query_embedding=emb,
+            resolved_question=question,
+            retrieved_chunks=state["retrieved_chunks"],
+            chunk_sources=state["chunk_sources"],
+            grade_result=state["relevant"]
+        )
 
     return {"answer": answer}
 
@@ -257,6 +288,19 @@ def calculator_node(state: GraphState) -> dict:
             answer += f" Note: figures for {missing_names} were not found in the retrieved chunks and are excluded from this comparison."
     except (ValueError, IndexError, KeyError, ZeroDivisionError) as e:
         answer = f"Could not complete the calculation: {e}"
+
+    if not state.get("cache_hit") and state.get("relevant") == "yes" and "Could not complete" not in answer and "Couldn't find" not in answer:
+        vs = get_vectorstore()
+        emb = vs.embeddings.embed_query(question)
+        put_cache(
+            route=state["route"],
+            companies=state["companies_mentioned"],
+            query_embedding=emb,
+            resolved_question=question,
+            retrieved_chunks=state["retrieved_chunks"],
+            chunk_sources=state["chunk_sources"],
+            grade_result=state["relevant"]
+        )
 
     return {"answer": answer}
 
@@ -491,6 +535,31 @@ def _rrf_merge(
     texts   = [texts_map[c]   for c in top_ids]
     sources = [sources_map[c] for c in top_ids]
     return texts, sources
+
+
+def cache_lookup_node(state: GraphState) -> dict:
+    route = state["route"]
+    companies = state["companies_mentioned"]
+    question = state["rewritten_question"] or state["question"]
+    
+    if route not in ["retrieve", "calculate"]:
+        return {"cache_hit": False}
+        
+    vs = get_vectorstore()
+    query_embedding = vs.embeddings.embed_query(question)
+    
+    cache_result = get_cache(route, companies, query_embedding)
+    if cache_result:
+        retrieved_chunks, chunk_sources, grade_result = cache_result
+        print(f"CACHE HIT: {route} {companies}")
+        return {
+            "cache_hit": True,
+            "retrieved_chunks": retrieved_chunks,
+            "chunk_sources": chunk_sources,
+            "relevant": grade_result
+        }
+        
+    return {"cache_hit": False}
 
 
 def retrieve_node(state: GraphState) -> dict:

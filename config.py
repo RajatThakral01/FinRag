@@ -13,7 +13,12 @@ MAX_RETRY          = 3     # max rewrite retries
 CHROMA_PATH        = "./chroma_db"
 COLLECTION_NAME    = "financial_10k"
 BM25_INDEX_PATH    = "./bm25_index.pkl"
-    
+
+# Session memory & retrieval cache (Phase A/B)
+SESSION_DB_PATH           = "./session_data.db"  # SQLite file for sessions + turns + cache
+CONTEXT_WINDOW            = 5                     # turns of history fed to context resolver
+CACHE_SIMILARITY_THRESHOLD = 0.88                 # cosine sim threshold for retrieval cache hits
+
 # Model per node (see Chapter 13)
 MODEL_ROUTER       = "meta/llama-3.1-8b-instruct"   # fast, cheap
 MODEL_GRADER       = "meta/llama-3.1-70b-instruct"   # fast, cheap

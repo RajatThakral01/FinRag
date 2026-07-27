@@ -14,6 +14,8 @@ class GraphState(TypedDict):
     retry_count: int
     final_answer: str
     error_message: Optional[str]
+    cache_hit: bool
+    conversation_context: Optional[str]
 
 
 def create_initial_state(question: str) -> GraphState:
@@ -30,6 +32,8 @@ def create_initial_state(question: str) -> GraphState:
         "retry_count": 0,
         "final_answer": "",
         "error_message": None,
+        "cache_hit": False,
+        "conversation_context": None,
     }
 
 
