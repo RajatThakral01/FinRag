@@ -61,24 +61,27 @@ def _cosine_similarity(v1: np.ndarray, v2: np.ndarray) -> float:
         return 0.0
     return dot / (norm1 * norm2)
 
-def get_cache(route: str, companies: List[str], query_embedding: List[float]) -> Optional[Tuple[List[str], List[dict], str]]:
+def get_cache(route: str, companies: List[str], metric_category: str, query_embedding: List[float]) -> Optional[Tuple[List[str], List[dict], str]]:
     """
     Look up a query in the semantic cache.
-    Requires an EXACT match on route and companies_mentioned,
+    Requires an EXACT match on route, companies_mentioned, and metric_category,
     and a cosine similarity > config.CACHE_SIMILARITY_THRESHOLD on the embedding.
     Returns (retrieved_chunks, chunk_sources, grade_result) if hit, else None.
     """
+    if metric_category == "general":
+        return None  # Bypass cache for general or multi-metric questions
+        
     companies_json = json.dumps(sorted(companies))
     q_vec = np.array(query_embedding, dtype=np.float32)
     
     with _get_conn() as conn:
-        # Fetch all candidates with the exact route and companies
+        # Fetch all candidates with the exact route, companies, and metric category
         # Only consider entries where grade_result was "yes" (good chunks)
         cursor = conn.execute(
             """SELECT cache_id, question_embedding, chunks_json, sources_json, grade_result 
                FROM retrieval_cache 
-               WHERE route = ? AND companies_json = ? AND grade_result = 'yes'""",
-            (route, companies_json)
+               WHERE route = ? AND companies_json = ? AND metric_category = ? AND grade_result = 'yes'""",
+            (route, companies_json, metric_category)
         )
         
         best_cache_id = None
@@ -106,15 +109,15 @@ def get_cache(route: str, companies: List[str], query_embedding: List[float]) ->
             
     return None
 
-def put_cache(route: str, companies: List[str], query_embedding: List[float], 
+def put_cache(route: str, companies: List[str], metric_category: str, query_embedding: List[float], 
               resolved_question: str, retrieved_chunks: List[str], chunk_sources: List[dict], 
               grade_result: str):
     """
     Save a retrieval result to the cache.
     Only called if retrieval was performed (not on cache hit) and grade_result was "yes".
     """
-    if grade_result != "yes":
-        return  # Do not cache failed retrievals
+    if grade_result != "yes" or metric_category == "general":
+        return  # Do not cache failed retrievals or general/multi-metric questions
         
     cache_id = str(uuid.uuid4())
     companies_json = json.dumps(sorted(companies))
@@ -124,10 +127,10 @@ def put_cache(route: str, companies: List[str], query_embedding: List[float],
     with _get_conn() as conn:
         conn.execute(
             """INSERT INTO retrieval_cache 
-               (cache_id, route, companies_json, question_embedding, resolved_question, 
+               (cache_id, route, companies_json, metric_category, question_embedding, resolved_question, 
                 chunks_json, sources_json, grade_result, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (cache_id, route, companies_json, emb_blob, resolved_question,
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (cache_id, route, companies_json, metric_category, emb_blob, resolved_question,
              json.dumps(retrieved_chunks), json.dumps(chunk_sources), grade_result, now)
         )
 
@@ -144,6 +147,7 @@ def _compute_corpus_hash() -> str:
         config.MODEL_ROUTER,
         config.MODEL_GRADER,
         config.MODEL_GENERATOR,
+        config.MODEL_CALCULATOR,
         config.MODEL_HALLUC,
         config.MODEL_REWRITE,
         str(config.TOP_K)

@@ -37,7 +37,7 @@ Adversarial scenarios this prompt is designed to handle correctly:
 """
 
 import config
-from langchain_nvidia_ai_endpoints import ChatNVIDIA
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
 
@@ -182,11 +182,11 @@ def resolve_context(question: str, history: list[dict]) -> str:
         # No history → nothing to resolve against → pass through unchanged
         return question
 
-    llm = ChatNVIDIA(
+    llm = ChatGroq(
         model=config.MODEL_REWRITE,
-        api_key=config.NVIDIA_API_KEY,
-        base_url=config.NVIDIA_BASE_URL,
-        temperature=0.0,
+        groq_api_key=config.GROQ_API_KEY,
+        
+        max_retries=config.GROQ_MAX_RETRIES, temperature=0.0,
     )
     chain = context_resolve_prompt | llm
 

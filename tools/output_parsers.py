@@ -22,7 +22,7 @@ def parse_grade(llm_output: str) -> str:
         return "yes"
     return "no" 
 
-def parse_companies(llm_output: str) -> list[str]:
+def parse_query_analysis(llm_output: str) -> dict:
     text = llm_output.strip()
 
     if text.startswith("```"):
@@ -34,10 +34,10 @@ def parse_companies(llm_output: str) -> list[str]:
     try:
         parsed = json.loads(text)
     except (json.JSONDecodeError, ValueError):
-        return ["all"]
+        return {"companies": ["all"], "metric_category": "general"}
 
-    if not isinstance(parsed, list):
-        return ["all"]
+    if not isinstance(parsed, dict) or "companies" not in parsed or "metric_category" not in parsed:
+        return {"companies": ["all"], "metric_category": "general"}
 
     return parsed
 

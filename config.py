@@ -2,8 +2,7 @@ from dotenv import load_dotenv
 import os
 load_dotenv()
     
-NVIDIA_API_KEY     = os.getenv("NVIDIA_API_KEY")
-NVIDIA_BASE_URL    = os.getenv("NVIDIA_BASE_URL")
+GROQ_API_KEY       = os.getenv("GROQ_API_KEY")
     
 EMBEDDING_MODEL    = "sentence-transformers/all-mpnet-base-v2"
 CHUNK_SIZE         = 450   # tokens
@@ -20,8 +19,12 @@ CONTEXT_WINDOW            = 5                     # turns of history fed to cont
 CACHE_SIMILARITY_THRESHOLD = 0.88                 # cosine sim threshold for retrieval cache hits
 
 # Model per node (see Chapter 13)
-MODEL_ROUTER       = "meta/llama-3.1-8b-instruct"   # fast, cheap
-MODEL_GRADER       = "meta/llama-3.1-70b-instruct"   # fast, cheap
-MODEL_GENERATOR    = "meta/llama-3.1-70b-instruct"  # powerful
-MODEL_HALLUC       = "meta/llama-3.1-8b-instruct"   # fast, cheap
-MODEL_REWRITE      = "meta/llama-3.1-8b-instruct"   # fast, cheap
+MODEL_ROUTER       = "llama-3.1-8b-instant"   # fast, cheap
+MODEL_GRADER       = "llama-3.3-70b-versatile"   # fast, cheap
+MODEL_GENERATOR    = "llama-3.3-70b-versatile"  # powerful
+MODEL_CALCULATOR   = "llama-3.3-70b-versatile"  # requires high reasoning for extraction
+MODEL_HALLUC       = "llama-3.1-8b-instant"   # fast, cheap
+MODEL_REWRITE      = "llama-3.1-8b-instant"   # fast, cheap
+
+# API Error Handling
+GROQ_MAX_RETRIES   = 5                    # Retry with exponential backoff on 429 Too Many Requests

@@ -16,6 +16,7 @@ class GraphState(TypedDict):
     error_message: Optional[str]
     cache_hit: bool
     conversation_context: Optional[str]
+    metric_category: str
 
 
 def create_initial_state(question: str) -> GraphState:
@@ -34,6 +35,7 @@ def create_initial_state(question: str) -> GraphState:
         "error_message": None,
         "cache_hit": False,
         "conversation_context": None,
+        "metric_category": "",
     }
 
 

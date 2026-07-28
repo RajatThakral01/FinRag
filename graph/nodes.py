@@ -1,11 +1,11 @@
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from langchain_nvidia_ai_endpoints import ChatNVIDIA
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
 import config
-from tools.output_parsers import parse_route, parse_companies, parse_grade, parse_hallucination, parse_calculation
+from tools.output_parsers import parse_route, parse_query_analysis, parse_grade, parse_hallucination, parse_calculation
 from tools.calculator import compute
 from graph.state import create_initial_state, GraphState
 from tools.vectorstore import get_vectorstore
@@ -41,29 +41,41 @@ router_prompt = ChatPromptTemplate.from_messages([
 ])
 
 
-company_extraction_prompt = ChatPromptTemplate.from_messages([
+query_analysis_prompt = ChatPromptTemplate.from_messages([
     ("system",
-     "You are extracting company names mentioned in a question, so a financial "
-     "search system knows which company's 10-K filing to search. "
+     "You are analyzing a financial question to extract the companies mentioned "
+     "AND classify the primary financial metric being asked about.\n\n"
+     "1. COMPANIES:\n"
      "Only these 9 companies exist in the system: "
-     "Apple, Microsoft, Amazon, NVIDIA, Tesla, Meta, Alphabet, Netflix, Adobe.\n\n"
+     "Apple, Microsoft, Amazon, NVIDIA, Tesla, Meta, Alphabet, Netflix, Adobe.\n"
      "Alias: 'Google' and 'Alphabet' both refer to the same company — return "
      "\"Google\" if the user wrote Google, \"Alphabet\" if the user wrote Alphabet. "
-     "Either spelling is accepted and will resolve to the same filing.\n\n"
-     "If the question names one or more of these companies (by name, ticker, or "
-     "clear reference), return a JSON array of exactly those company names, "
-     "using the exact spelling the user wrote (from the list above, including "
-     "the Google alias).\n"
-     "If the question does not mention any specific company from the list "
-     "(e.g. it asks about \"which company\" or makes no company reference at all), "
-     "return [\"all\"].\n\n"
+     "If the question names one or more of these companies, return exactly those names. "
+     "If no specific company from the list is mentioned, return [\"all\"].\n\n"
+     "2. METRIC CATEGORY:\n"
+     "Classify the question into EXACTLY ONE of the following categories:\n"
+     "- \"revenue_sales\": Revenue, Net Sales, Top Line\n"
+     "- \"net_income_profit\": Net Income, Net Profit, Bottom Line\n"
+     "- \"operating_income\": Operating Income, EBIT, Operating Profit, Operating Margin\n"
+     "- \"gross_profit\": Gross Profit, Gross Margin, Cost of Goods Sold\n"
+     "- \"cash_flow\": Operating Cash Flow, Free Cash Flow, Investing, Financing\n"
+     "- \"assets_liabilities_equity\": Total Assets, Total Liabilities, Balance Sheet items\n"
+     "- \"r_and_d\": Research and Development Expense\n"
+     "- \"s_g_and_a\": SG&A, Sales and Marketing, General and Administrative\n"
+     "- \"eps\": Earnings Per Share, basic or diluted\n"
+     "- \"tax_expense\": Income Tax Provision, Tax Expense, Effective Tax Rate\n"
+     "- \"business_description\": What the company does, business overview, product segments\n"
+     "- \"risk_factors\": Risk factors, threats, legal proceedings, competition\n"
+     "- \"general\": Any query that spans MULTIPLE metrics (e.g. \"compare revenue and margins\"), "
+     "is ambiguous, or does not clearly fit into exactly one of the specific buckets above.\n\n"
      "Examples:\n"
-     "Q: What was Apple's revenue? -> [\"Apple\"]\n"
-     "Q: Compare Apple and Microsoft's margins -> [\"Apple\", \"Microsoft\"]\n"
-     "Q: Which of Apple, Google, and Amazon had the highest R&D? -> [\"Apple\", \"Google\", \"Amazon\"]\n"
-     "Q: Which company had the highest revenue? -> [\"all\"]\n"
-     "Q: What does EBITDA mean? -> [\"all\"]\n\n"
-     "Return ONLY the JSON array. No explanation, no markdown formatting."),
+     "Q: What was Apple's revenue? -> {{\"companies\": [\"Apple\"], \"metric_category\": \"revenue_sales\"}}\n"
+     "Q: Compare Apple and Microsoft's margins -> {{\"companies\": [\"Apple\", \"Microsoft\"], \"metric_category\": \"general\"}}\n"
+     "Q: What is Tesla's tax rate? -> {{\"companies\": [\"Tesla\"], \"metric_category\": \"tax_expense\"}}\n"
+     "Q: Which company had the highest R&D? -> {{\"companies\": [\"all\"], \"metric_category\": \"r_and_d\"}}\n"
+     "Q: What does EBITDA mean? -> {{\"companies\": [\"all\"], \"metric_category\": \"general\"}}\n\n"
+     "Return ONLY a JSON object containing the \"companies\" array and \"metric_category\" string. "
+     "No explanation, no markdown formatting."),
     ("human", "{question}")
 ])
 
@@ -146,7 +158,7 @@ def generate_node(state: GraphState) -> dict:
     else:
         conv_text = ""
 
-    llm = ChatNVIDIA(model=config.MODEL_GENERATOR, temperature=0.0)
+    llm = ChatGroq(model=config.MODEL_CALCULATOR, groq_api_key=config.GROQ_API_KEY, max_retries=config.GROQ_MAX_RETRIES, temperature=0.0)
     chain = generate_prompt | llm
 
     response = chain.invoke({
@@ -162,6 +174,7 @@ def generate_node(state: GraphState) -> dict:
         put_cache(
             route=state["route"],
             companies=state["companies_mentioned"],
+            metric_category=state["metric_category"],
             query_embedding=emb,
             resolved_question=question,
             retrieved_chunks=state["retrieved_chunks"],
@@ -188,7 +201,7 @@ direct_answer_prompt = ChatPromptTemplate.from_messages([
 def direct_answer_node(state: GraphState) -> dict:
     question = state["question"]
 
-    llm = ChatNVIDIA(model=config.MODEL_GENERATOR, temperature=0.0)
+    llm = ChatGroq(model=config.MODEL_GENERATOR, groq_api_key=config.GROQ_API_KEY, max_retries=config.GROQ_MAX_RETRIES, temperature=0.0)
     chain = direct_answer_prompt | llm
 
     response = chain.invoke({"question": question})
@@ -250,7 +263,7 @@ def calculator_node(state: GraphState) -> dict:
     question = state["rewritten_question"] or state["question"]
     context = _format_context(state["retrieved_chunks"], state["chunk_sources"])
 
-    llm = ChatNVIDIA(model=config.MODEL_GENERATOR, temperature=0.0)
+    llm = ChatGroq(model=config.MODEL_CALCULATOR, groq_api_key=config.GROQ_API_KEY, max_retries=config.GROQ_MAX_RETRIES, temperature=0.0)
     chain = calculator_extract_prompt | llm
 
     response = chain.invoke({"question": question, "chunks": context})
@@ -295,6 +308,7 @@ def calculator_node(state: GraphState) -> dict:
         put_cache(
             route=state["route"],
             companies=state["companies_mentioned"],
+            metric_category=state["metric_category"],
             query_embedding=emb,
             resolved_question=question,
             retrieved_chunks=state["retrieved_chunks"],
@@ -325,7 +339,7 @@ def hallucination_check_node(state: GraphState) -> dict:
     answer = state["answer"]
     context = _format_context(state["retrieved_chunks"], state["chunk_sources"])
 
-    llm = ChatNVIDIA(model=config.MODEL_HALLUC, temperature=0.0)
+    llm = ChatGroq(model=config.MODEL_HALLUC, groq_api_key=config.GROQ_API_KEY, max_retries=config.GROQ_MAX_RETRIES, temperature=0.0)
     chain = hallucination_prompt | llm
 
     response = chain.invoke({"answer": answer, "chunks": context})
@@ -384,10 +398,9 @@ def _format_context(retrieved_chunks: list[str], chunk_sources: list[dict]) -> s
 
 
 def rewrite_node(state: GraphState) -> dict:
-    llm = ChatNVIDIA(
+    llm = ChatGroq(
         model=config.MODEL_REWRITE,
-        api_key=config.NVIDIA_API_KEY,
-        base_url=config.NVIDIA_BASE_URL,
+        groq_api_key=config.GROQ_API_KEY,
         temperature=0.0
     )
 
@@ -403,10 +416,9 @@ def rewrite_node(state: GraphState) -> dict:
 
 
 def grade_node(state: GraphState) -> dict:
-    llm = ChatNVIDIA(
+    llm = ChatGroq(
         model=config.MODEL_GRADER,
-        api_key=config.NVIDIA_API_KEY,
-        base_url=config.NVIDIA_BASE_URL,
+        groq_api_key=config.GROQ_API_KEY,
         temperature=0.0
     )
 
@@ -432,10 +444,9 @@ def grade_node(state: GraphState) -> dict:
     return {"relevant": relevant}
 
 def router_node(state: GraphState) -> dict:
-    llm = ChatNVIDIA(
+    llm = ChatGroq(
         model=config.MODEL_ROUTER,
-        api_key=config.NVIDIA_API_KEY,
-        base_url=config.NVIDIA_BASE_URL,
+        groq_api_key=config.GROQ_API_KEY,
         temperature=0.0
     )
 
@@ -443,11 +454,14 @@ def router_node(state: GraphState) -> dict:
     route_response = route_chain.invoke({"question": state["question"]})
     route = parse_route(route_response.content)
 
-    company_chain = company_extraction_prompt | llm
-    company_response = company_chain.invoke({"question": state["question"]})
-    companies_mentioned = parse_companies(company_response.content)
+    analysis_chain = query_analysis_prompt | llm
+    analysis_response = analysis_chain.invoke({"question": state["question"]})
+    analysis = parse_query_analysis(analysis_response.content)
+    
+    companies_mentioned = analysis["companies"]
+    metric_category = analysis["metric_category"]
 
-    return {"route": route, "companies_mentioned": companies_mentioned}
+    return {"route": route, "companies_mentioned": companies_mentioned, "metric_category": metric_category}
 
 def _chunks_to_state(docs: list) -> tuple[list[str], list[dict]]:
     """Convert Chroma Document objects to parallel (texts, sources) lists."""
@@ -548,10 +562,10 @@ def cache_lookup_node(state: GraphState) -> dict:
     vs = get_vectorstore()
     query_embedding = vs.embeddings.embed_query(question)
     
-    cache_result = get_cache(route, companies, query_embedding)
+    cache_result = get_cache(route, companies, state["metric_category"], query_embedding)
     if cache_result:
         retrieved_chunks, chunk_sources, grade_result = cache_result
-        print(f"CACHE HIT: {route} {companies}")
+        print(f"CACHE HIT: {route} {companies} {state['metric_category']}")
         return {
             "cache_hit": True,
             "retrieved_chunks": retrieved_chunks,
