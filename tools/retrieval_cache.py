@@ -174,7 +174,7 @@ def _check_and_invalidate_cache():
             conn.execute("INSERT INTO cache_metadata (id, corpus_hash) VALUES (1, ?)", (current_hash,))
         elif row[0] != current_hash:
             # Hash changed, clear cache and update
-            print(f"Corpus/Config changed! Clearing cache. (old: {row[0]}, new: {current_hash})")
+            # Corpus/Config changed! Clearing cache.
             conn.execute("DELETE FROM retrieval_cache")
             conn.execute("UPDATE cache_metadata SET corpus_hash = ? WHERE id = 1", (current_hash,))
 

@@ -565,7 +565,7 @@ def cache_lookup_node(state: GraphState) -> dict:
     cache_result = get_cache(route, companies, state["metric_category"], query_embedding)
     if cache_result:
         retrieved_chunks, chunk_sources, grade_result = cache_result
-        print(f"CACHE HIT: {route} {companies} {state['metric_category']}")
+        # Debug print removed
         return {
             "cache_hit": True,
             "retrieved_chunks": retrieved_chunks,

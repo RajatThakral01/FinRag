@@ -7,7 +7,7 @@ langchain-core==0.2.28
 langchain-community==0.2.0
     
     # LangChain integrations
-langchain-groq==0.1.9==0.1.0   # NVIDIA NIM
+langchain-groq==0.1.9                   # Groq Cloud
 langchain-huggingface==0.0.3            # HuggingFace embeddings
 langchain-chroma==0.1.4              # ChromaDB
     
@@ -19,9 +19,6 @@ sentence-transformers==3.0.0
     
     # LangGraph
 langgraph==0.1.19
-    
-    # UI
-streamlit==1.35.0
     
     # Utilities
 python-dotenv==1.0.0

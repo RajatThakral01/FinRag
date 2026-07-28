@@ -1,6 +1,6 @@
 # Financial Intelligence RAG System — Project Specification
 
-*Last updated: 2026-07-27 (Post-BM25 Hybrid Search — Fully Implemented)*
+*Last updated: 2026-07-28 (Post Session Memory, Semantic Cache, and Groq Migration — Backend Complete)*
 
 ---
 
@@ -12,9 +12,14 @@ The pipeline uses **LangGraph** for orchestration with a fully stateful, cyclic 
 - Intelligent query routing (retrieve / calculate / direct)
 - Per-company relevance grading
 - Query rewriting with retry loop
-- Hybrid retrieval (BM25 + Vector + RRF) — **fully implemented**
+- Hybrid retrieval (BM25 + Vector + RRF) — fully implemented
 - Calculator node (LLM extraction + deterministic Python math)
 - Hallucination detection with retry/honest-failure fallback
+- **Multi-session conversational memory** with pre-graph context resolution — fully implemented
+- **Metric-aware semantic retrieval cache** with automatic invalidation — fully implemented
+- **FastAPI REST layer** exposing the pipeline for a future frontend — fully implemented
+
+The backend (RAG pipeline + session memory + caching + API) is **complete and tested**. A modern frontend (replacing the originally-planned Streamlit UI) is the only remaining phase, deferred pending tooling availability.
 
 ---
 
@@ -28,19 +33,22 @@ The pipeline uses **LangGraph** for orchestration with a fully stateful, cyclic 
 | Section Detection | Custom Python regex (SEC Item boundaries) via `ingestion/line_classifier.py` |
 | Chunking | LangChain `RecursiveCharacterTextSplitter` (prose) + custom row-aware chunker (tables) |
 | Token Counting | `tiktoken` (cl100k_base encoding) |
-| Embeddings | `sentence-transformers/all-mpnet-base-v2` via `langchain-huggingface` |
+| Embeddings | `sentence-transformers/all-mpnet-base-v2` via `langchain-huggingface` (used for retrieval AND cache key similarity) |
 | Vector Store | ChromaDB (`chroma_db/`) via `langchain-chroma` |
 | Sparse Index | BM25Okapi (`rank_bm25`), pickled to `./bm25_index.pkl` |
-| LLM | NVIDIA NIM API (`langchain-nvidia-ai-endpoints`, `ChatNVIDIA`) |
+| **LLM Provider** | **Groq API** (`langchain-groq`, `ChatGroq`) — *migrated from NVIDIA NIM* |
+| Session Storage | SQLite (`session_data.db`) — sessions, turns, and retrieval cache tables, WAL mode |
 | Graph Orchestration | LangGraph (`StateGraph`) |
-| UI Framework | Streamlit *(planned — Phase 9, not yet built)* |
+| API Layer | FastAPI + Uvicorn |
+| UI Framework | *Deferred — Streamlit rejected; modern custom frontend planned, not yet built* |
 | Language | Python 3.11+ |
+
+> **Provider migration note:** This project originally used NVIDIA NIM. It was fully migrated to Groq as the sole LLM provider (chosen for availability and speed during development). All five model-role constants below now reference Groq model names. See Section 15 for rate-limit implications of this choice.
 
 ### `config.py` — All Tunable Parameters
 
 ```python
-NVIDIA_API_KEY     = os.getenv("NVIDIA_API_KEY")     # from .env
-NVIDIA_BASE_URL    = os.getenv("NVIDIA_BASE_URL")     # from .env
+GROQ_API_KEY       = os.getenv("GROQ_API_KEY")     # from .env
 
 EMBEDDING_MODEL    = "sentence-transformers/all-mpnet-base-v2"
 CHUNK_SIZE         = 450      # tokens (safely under model's 512 token limit)
@@ -52,11 +60,22 @@ CHROMA_PATH        = "./chroma_db"
 COLLECTION_NAME    = "financial_10k"
 BM25_INDEX_PATH    = "./bm25_index.pkl"
 
-MODEL_ROUTER       = "meta/llama-3.1-8b-instruct"   # fast — 3-way classification
-MODEL_GRADER       = "meta/llama-3.1-70b-instruct"  # per-company reasoning requires quality
-MODEL_GENERATOR    = "meta/llama-3.1-70b-instruct"  # main answer generation
-MODEL_HALLUC       = "meta/llama-3.1-8b-instruct"   # binary verification
-MODEL_REWRITE      = "meta/llama-3.1-8b-instruct"   # query reformulation
+# --- LLM model roles (Groq) ---
+MODEL_ROUTER       = "llama-3.1-8b-instant"        # fast — routing + company/metric extraction
+MODEL_GRADER       = "llama-3.3-70b-versatile"     # per-company relevance reasoning
+MODEL_GENERATOR    = "llama-3.3-70b-versatile"     # main answer generation
+MODEL_HALLUC       = "llama-3.1-8b-instant"        # binary groundedness verification
+MODEL_REWRITE      = "llama-3.1-8b-instant"        # query reformulation
+MODEL_CALCULATOR   = "llama-3.3-70b-versatile"     # numeric extraction for calculator_node
+
+GROQ_MAX_RETRIES   = 5        # SDK-level retry/backoff on 429 rate-limit responses
+
+# --- Session memory ---
+SESSION_DB_PATH            = "./session_data.db"
+CONTEXT_WINDOW             = 5     # turns of history fed to the context resolver
+
+# --- Semantic retrieval cache ---
+CACHE_SIMILARITY_THRESHOLD = 0.88  # cosine similarity floor, applied only WITHIN a matched metric_category
 ```
 
 ### Key Dependencies (`requirements.txt`)
@@ -66,17 +85,20 @@ pymupdf==1.24.0
 langchain==0.2.0
 langchain-core==0.2.28
 langchain-community==0.2.0
-langchain-nvidia-ai-endpoints==0.1.0
+langchain-groq==0.1.9              # pinned — newer versions require langchain-core >= 1.4.0
 langchain-huggingface==0.0.3
 langchain-chroma==0.1.4
 chromadb==0.5.0
 sentence-transformers==3.0.0
 langgraph==0.1.19
-streamlit==1.35.0
+fastapi
+uvicorn
 python-dotenv==1.0.0
 tiktoken==0.7.0
-rank_bm25              # BM25Okapi for sparse retrieval
+rank_bm25                          # BM25Okapi for sparse retrieval
 ```
+
+*(Removed: `langchain-nvidia-ai-endpoints`, `streamlit`)*
 
 ---
 
@@ -84,38 +106,41 @@ rank_bm25              # BM25Okapi for sparse retrieval
 
 ```
 RAG_Project/
-├── config.py                  # Central config — all model names, paths, k values
-├── .env                       # API keys (never committed)
+├── config.py                  # Central config — model names, paths, k values, cache/session settings
+├── .env                       # API keys (GROQ_API_KEY) — never committed
+├── api.py                     # FastAPI application — REST layer over the graph
 │
 ├── graph/
 │   ├── state.py               # GraphState TypedDict + create_initial_state()
-│   ├── nodes.py               # All 10 node functions + all prompt templates
-│   ├── edges.py               # Conditional edge routing functions (4 functions)
-│   └── graph.py               # build_graph() + run_query()
+│   ├── nodes.py                # All node functions + all prompt templates
+│   ├── edges.py                # Conditional edge routing functions
+│   └── graph.py                # build_graph(), run_query(), run_session_query()
 │
 ├── tools/
-│   ├── vectorstore.py         # ChromaDB singleton getter (lazy-loaded)
-│   ├── bm25_index.py          # BM25 index build/cache/query — full implementation
-│   ├── calculator.py          # compute() — pure Python arithmetic (8 operations)
-│   ├── output_parsers.py      # Defensive LLM output parsers (5 parse functions)
-│   └── company_names.py       # SHORT_TO_FULL mapping + get_all_full_names()
+│   ├── vectorstore.py          # ChromaDB singleton getter (lazy-loaded)
+│   ├── bm25_index.py           # BM25 index build/cache/query — full implementation
+│   ├── calculator.py           # compute() — pure Python arithmetic (8 operations)
+│   ├── output_parsers.py       # Defensive LLM output parsers
+│   ├── company_names.py        # SHORT_TO_FULL mapping + get_all_full_names()
+│   ├── session_store.py        # SQLite session/turn CRUD — NEW
+│   ├── context_resolver.py     # Pre-graph follow-up question resolution — NEW
+│   └── retrieval_cache.py      # Semantic retrieval cache + invalidation — NEW
 │
 ├── ingestion/
-│   ├── line_classifier.py     # Classify lines (section_header/table_row/prose/blank)
-│   ├── chunker.py             # Prose chunking (LangChain) + table chunking (custom)
-│   ├── metadata_tagger.py     # Build tagged chunk dicts from extracted text files
-│   ├── parent_linker.py       # Link adjacent prose<->table chunk pairs
-│   ├── embed_and_store.py     # Embed all chunks and populate ChromaDB
-│   └── embedding_check.py     # One-off sanity check for embedding model
+│   ├── line_classifier.py      # Classify lines (section_header/table_row/prose/blank)
+│   ├── chunker.py               # Prose chunking (LangChain) + table chunking (custom)
+│   ├── metadata_tagger.py       # Build tagged chunk dicts from extracted text files
+│   ├── parent_linker.py         # Link adjacent prose<->table chunk pairs
+│   ├── embed_and_store.py       # Embed all chunks and populate ChromaDB
+│   └── embedding_check.py       # One-off sanity check for embedding model
 │
-├── extracted_text/            # Docling-extracted markdown (one .md per company PDF)
-├── chroma_db/                 # Persistent ChromaDB store (3,063 chunks, 9 companies)
-├── bm25_index.pkl             # Pickled BM25Okapi bundle (~8.8 MB, build-once cache)
+├── extracted_text/             # Docling-extracted markdown (one .md per company PDF)
+├── chroma_db/                  # Persistent ChromaDB store (3,063 chunks, 9 companies)
+├── bm25_index.pkl              # Pickled BM25Okapi bundle (~8.8 MB, build-once cache)
+├── session_data.db             # SQLite — sessions, turns, retrieval_cache, cache_metadata tables
 │
-├── text_extractor.py          # PDF -> markdown via Docling (run once per PDF)
-├── inspect_extract.py         # Extraction inspection utility
-├── test_pipeline.py           # Full-graph integration test (run from project root)
-├── test_setup.py              # Environment setup verification
+├── text_extractor.py           # PDF -> markdown via Docling (run once per PDF)
+├── inspect_extract.py           # Extraction inspection utility
 └── requirements.txt
 ```
 
@@ -123,97 +148,41 @@ RAG_Project/
 
 ## 4. Data & Ingestion Pipeline
 
-The ingestion pipeline is a **one-time offline process** that converts raw PDFs into a queryable vector store + BM25 index.
+*(Unchanged from original design — Phases 1–6 below are stable and complete.)*
 
 ### Phase 1: PDF Extraction (`text_extractor.py`)
-
-- **Tool**: Docling with table structure detection ON and OCR OFF.
-- **Output**: One structured `.md` file per company in `extracted_text/` (e.g., `apple_2024.md`).
-- **Why Docling**: Its built-in table structure detection produces well-formed markdown tables from 10-K financial statements — a critical quality advantage over character-based extraction.
-- Each PDF is processed in isolation to avoid memory accumulation across files.
+Docling with table structure detection ON, OCR OFF. One `.md` file per company in `extracted_text/`.
 
 ### Phase 2: Line Classification (`ingestion/line_classifier.py`)
-
-Reads each `.md` file line by line and assigns one of four types:
-
-| Type | Detection Rule |
-|---|---|
-| `section_header` | Matches `^Item \d+[A]?.` regex OR markdown `#` heading matching a known SEC item title |
-| `table_row` | Starts with `\|` and contains 2+ pipe characters |
-| `prose` | Everything else (non-blank, non-header, non-table) |
-| `blank` | Empty line — used as block separator |
-
-Known SEC Item titles are stored in `STANDARD_ITEM_TITLES` dict (Items 1–16). The `group_into_blocks()` function then merges consecutive same-type lines into typed blocks, tracking `section_name` and `item_number` metadata.
+Classifies lines into `section_header` / `table_row` / `prose` / `blank`, using SEC Item regex matching and a `STANDARD_ITEM_TITLES` dict (Items 1–16).
 
 ### Phase 3: Two-Track Chunking (`ingestion/chunker.py`)
-
-The system uses a two-track chunking strategy to avoid destroying financial tables:
-
-| Track | Applied To | Method |
-|---|---|---|
-| **Track A — Prose** | MD&A, Risk Factors, Business, Notes | LangChain `RecursiveCharacterTextSplitter` — 450 tokens, 50 overlap, `cl100k_base` encoding |
-| **Track B — Tables** | Financial Statements (Item 8), quantitative sections | Custom row-aware chunker — never splits a row mid-number; prepends column header row to every chunk |
-
-**Table chunk header format** (prepended to every table chunk):
-```
-Apple Inc. | 2024 | Income Statement | Columns: 2024, 2023, 2022
-Net income: 97,329  96,995  102,962
-...
-```
-
-This makes every table chunk self-contained — the numbers are always readable alongside their column headers.
+- **Track A — Prose**: LangChain `RecursiveCharacterTextSplitter`, 450 tokens, 50 overlap, `cl100k_base`.
+- **Track B — Tables**: custom row-aware chunker; never splits a row mid-number; prepends column header row to every chunk.
 
 ### Phase 4: Metadata Tagging (`ingestion/metadata_tagger.py`)
+Each chunk tagged with `company`, `ticker`, `year`, `item_number`, `section_name`, `chunk_type`, `table_name`, `chunk_id`, `parent_chunk_id`, `page_start`, `block_idx`.
 
-Each chunk is tagged with a full metadata dict:
-
-```json
-{
-    "company":         "Apple Inc.",
-    "ticker":          "AAPL",
-    "year":            "2024",
-    "item_number":     "8",
-    "section_name":    "Financial Statements and Supplementary Data",
-    "chunk_type":      "table",
-    "table_name":      "Income Statement",
-    "chunk_id":        "aapl_2024_item8_table_042_001",
-    "parent_chunk_id": "aapl_2024_item8_prose_041_002",
-    "page_start":      null,
-    "block_idx":       42
-}
-```
-
-**Chunk ID format**: `{ticker_lower}_{year}_item{item_number}_{prose|table}_{block_idx:03d}_{chunk_idx:03d}`
-Example: `aapl_2024_item8_table_042_001`
-
-**Company slug -> full name mapping** (`COMPANY_MAP` in `metadata_tagger.py`):
+Company slug → full name mapping (`COMPANY_MAP`):
 ```python
 {
-    "apple":     ("Apple Inc.", "AAPL"),
-    "microsoft": ("Microsoft Corporation", "MSFT"),
-    "amazon":    ("Amazon.com Inc.", "AMZN"),
-    "nvidia":    ("NVIDIA Corporation", "NVDA"),
-    "tesla":     ("Tesla Inc.", "TSLA"),
-    "meta":      ("Meta Platforms Inc.", "META"),
-    "alphabet":  ("Alphabet Inc.", "GOOGL"),
-    "netflix":   ("Netflix Inc.", "NFLX"),
-    "adobe":     ("Adobe Inc.", "ADBE"),
+    "apple": ("Apple Inc.", "AAPL"), "microsoft": ("Microsoft Corporation", "MSFT"),
+    "amazon": ("Amazon.com Inc.", "AMZN"), "nvidia": ("NVIDIA Corporation", "NVDA"),
+    "tesla": ("Tesla Inc.", "TSLA"), "meta": ("Meta Platforms Inc.", "META"),
+    "alphabet": ("Alphabet Inc.", "GOOGL"), "netflix": ("Netflix Inc.", "NFLX"),
+    "adobe": ("Adobe Inc.", "ADBE"),
 }
 ```
 
 ### Phase 5: Parent Linking (`ingestion/parent_linker.py`)
-
-After all chunks are tagged, `link_parent_chunks()` scans adjacent blocks. If two consecutive blocks are in the **same section** (`section_name` + `item_number` match) but of **different types** (prose -> table or table -> prose), the first chunk of the second block gets a `parent_chunk_id` pointing to the last chunk of the first block. This links explanatory prose to its adjacent financial table.
+Links adjacent prose↔table blocks within the same section via `parent_chunk_id`.
 
 ### Phase 6: Boilerplate Filtering + Embedding (`ingestion/embed_and_store.py`)
-
-- **Boilerplate filter**: Chunks without an `item_number` are excluded (they belong to table-of-contents, cover pages, or other preamble — not queryable content).
-- **Embedding**: `HuggingFaceEmbeddings("sentence-transformers/all-mpnet-base-v2")` — runs locally.
-- **Storage**: `Chroma.from_texts()` with full metadata; persisted to `./chroma_db`, collection `financial_10k`.
+Chunks without an `item_number` excluded. Embedded via `HuggingFaceEmbeddings`, persisted to `./chroma_db`, collection `financial_10k`.
 
 ### ChromaDB — Current Corpus State
 
-**3,063 chunks** across 9 companies in collection `financial_10k`:
+**3,063 chunks** across 9 companies:
 
 | Company | Ticker | Chunks |
 |---|---|---|
@@ -236,21 +205,29 @@ Defined in `graph/state.py`:
 
 ```python
 class GraphState(TypedDict):
-    question:             str               # original user question
-    rewritten_question:   str               # reformulated by rewrite_node (or "" if unused)
-    route:                str               # "retrieve" / "calculate" / "direct"
-    companies_mentioned:  List[str]         # extracted company names or ["all"]
-    retrieved_chunks:     List[str]         # parallel list of chunk text
-    chunk_sources:        List[dict]        # parallel list of chunk metadata dicts
-    relevant:             str               # "yes" / "no" (set by grade_node)
-    answer:               str               # intermediate answer (before hallucination check)
-    grounded:             str               # "grounded" / "not_grounded"
-    retry_count:          int               # shared across rewrite + hallucination retries
-    final_answer:         str               # the answer exposed to the user / UI
-    error_message:        Optional[str]     # low-confidence warning or honest failure msg
+    # --- original fields ---
+    question:             str
+    rewritten_question:   str
+    route:                str
+    companies_mentioned:  List[str]
+    retrieved_chunks:      List[str]
+    chunk_sources:         List[dict]
+    relevant:              str
+    answer:                str
+    grounded:              str
+    retry_count:           int
+    final_answer:          str
+    error_message:         Optional[str]
+
+    # --- added for semantic cache ---
+    metric_category:       str               # controlled-vocabulary classification (see Section 9)
+    cache_hit:             bool              # True if retrieve/grade were skipped via cache
+
+    # --- added for conversational memory ---
+    conversation_context:  Optional[str]     # last 2-3 Q&A pairs, formatted; used for tone only, never facts
 ```
 
-Initial state created by `create_initial_state(question)` with all fields zeroed/empty.
+**Design note:** full conversation history is deliberately *not* stored in `GraphState`. Session history lives in SQLite (`tools/session_store.py`); the context resolver runs *before* the graph is invoked and produces a single resolved, standalone question that enters the graph exactly as if the user had typed it.
 
 ---
 
@@ -260,45 +237,56 @@ Initial state created by `create_initial_state(question)` with all fields zeroed
 
 | Node | Function | Model | Purpose |
 |---|---|---|---|
-| `router` | `router_node()` | 8B | Classify route + extract companies (2 LLM calls) |
-| `retrieve` | `retrieve_node()` | — | Hybrid BM25+Vector search, RRF merge per company |
-| `grade` | `grade_node()` | 70B | Per-company relevance check — must pass for EVERY company |
+| `cache_lookup` | `cache_lookup_node()` | embedding only | Composite-key semantic cache check — **NEW** |
+| `router` | `router_node()` | 8B | Classify route + extract companies + classify `metric_category` (merged into one call) |
+| `retrieve` | `retrieve_node()` | — | Hybrid BM25+Vector search, RRF merge per company (skipped on cache hit) |
+| `grade` | `grade_node()` | 70B | Per-company relevance check (skipped on cache hit) |
 | `rewrite` | `rewrite_node()` | 8B | Reformulate question with standard financial terminology |
-| `generate` | `generate_node()` | 70B | Synthesize answer from labeled context chunks |
-| `calculator` | `calculator_node()` | 70B | Extract numbers from chunks -> Python `compute()` |
-| `direct_answer` | `direct_answer_node()` | 70B | Answer general finance concepts (no document lookup) |
-| `hallucination_check` | `hallucination_check_node()` | 8B | Verify every figure is traceable to source chunks |
+| `generate` | `generate_node()` | 70B | Synthesize answer from labeled context chunks; now also receives `conversation_context` for tone |
+| `calculator` | `calculator_node()` | 70B (`MODEL_CALCULATOR`) | Extract numbers from chunks → Python `compute()` |
+| `direct_answer` | `direct_answer_node()` | 70B | Answer general finance concepts (no document lookup); no cache interaction |
+| `hallucination_check` | `hallucination_check_node()` | 8B | Verify every figure is traceable to source chunks — **always runs, cache hit or miss** |
 | `grade_exhausted_warning` | `grade_exhausted_warning_node()` | — | Write low-confidence warning to `error_message` |
 | `hallucination_exhausted` | `hallucination_exhausted_node()` | — | Write honest failure message to `final_answer` |
 
 ### Graph Entry Point & Edge Routing (`graph/edges.py`)
 
-Entry point: `router` node.
+Entry point: `router` node → **`cache_lookup`** (new) → `retrieve` (miss) / `generate`|`calculator` (hit)
 
 ```
 router
   |--[route == "direct"]-----------> direct_answer --> END
-  |--[route == "retrieve"/"calculate"] -> retrieve
+  |--[route == "retrieve"/"calculate"] -> cache_lookup
                                             |
-                                          grade
-                              [yes]     [rewrite]    [exhausted]
-                               |            |             |
-                          generate/     retrieve    grade_exhausted_warning
-                          calculator      (^)         |-> generate
-                               |                      |-> calculator
-                               |
-                       hallucination_check
-                    [grounded] [retry]  [exhausted]
-                        |        |           |
-                       END  generate/   hallucination_exhausted -> END
-                            calculator
+                              [HIT: grade="yes" previously]   [MISS]
+                                    |                            |
+                          generate/calculator                 retrieve
+                                    |                            |
+                                    |                          grade
+                                    |              [yes]     [rewrite]    [exhausted]
+                                    |               |            |             |
+                                    |          generate/     retrieve    grade_exhausted_warning
+                                    |          calculator      (^)         |-> generate/calculator
+                                    |               |
+                                    +---------------+
+                                            |
+                                   hallucination_check
+                                [grounded] [retry]  [exhausted]
+                                    |        |           |
+                                   END  generate/   hallucination_exhausted -> END
+                                        calculator
 ```
 
 **Edge functions in `graph/edges.py`:**
 
 ```python
 def route_after_router(state) -> str:
-    return "direct" if state["route"] == "direct" else "retrieve"
+    return "direct" if state["route"] == "direct" else "cache_lookup"
+
+def route_after_cache(state) -> str:
+    if state["cache_hit"]:
+        return "calculate" if state["route"] == "calculate" else "generate"
+    return "retrieve"
 
 def route_after_grade(state) -> str:
     if state["relevant"] == "yes":
@@ -308,7 +296,6 @@ def route_after_grade(state) -> str:
     return "exhausted"
 
 def route_by_calc_type(state) -> str:
-    # After grade_exhausted_warning: still pick generate vs calculate
     return "calculate" if state["route"] == "calculate" else "generate"
 
 def route_after_hallucination(state) -> str:
@@ -319,56 +306,44 @@ def route_after_hallucination(state) -> str:
     return "exhausted"
 ```
 
+**Cache bypass matrix:**
+
+| Pipeline Stage | Cache Hit | Cache Miss |
+|---|---|---|
+| Router | ✅ Always runs | ✅ Always runs |
+| Cache Lookup | ✅ Runs, returns hit | ✅ Runs, returns miss |
+| Retrieve | ⏭ Skipped | ✅ Runs |
+| Grade | ⏭ Skipped | ✅ Runs |
+| Rewrite loop | ⏭ Skipped | ✅ Runs if grade="no" |
+| Generate/Calculator | ✅ Always runs (fresh) | ✅ Always runs |
+| Hallucination Check | ✅ Always runs | ✅ Always runs |
+| Hallucination retry | ✅ Normal retry logic | ✅ Normal retry logic |
+
 ---
 
-## 7. Retrieval Strategy — Hybrid Search (Fully Implemented)
+## 7. Retrieval Strategy — Hybrid Search
+
+*(Unchanged — fully implemented and stable.)*
 
 ### Why Hybrid? The Pure-Vector Problem
-
-Pure vector (embedding) similarity favors narrative text over numeric tables. In real testing, MD&A paragraphs *mentioning* a metric consistently out-ranked the actual financial table *containing* the exact numeric total — even after query rewrites. BM25 fixes this by rewarding chunks where the query's exact terms are densely concentrated.
+Pure vector similarity favors narrative text over numeric tables; MD&A prose mentioning a metric can outrank the table containing the exact total. BM25 fixes this by rewarding chunks where the query's exact terms are densely concentrated.
 
 ### Architecture (`tools/bm25_index.py`)
+1. One global BM25 index (corpus-wide IDF).
+2. Pickle cache at `./bm25_index.pkl` (~8.8 MB); delete to force rebuild.
+3. Corpus pulled from Chroma `.get()` — exact parity with the vector index.
+4. Module-level lazy singleton, loaded once per process lifetime.
 
-**Design decisions:**
-1. **ONE global BM25 index** — IDF is more meaningful when computed over the full corpus (all 9 companies, 3,063 chunks), not per-company.
-2. **Pickle cache** — index is built once and saved to `./bm25_index.pkl` (~8.8 MB). Loaded on subsequent runs. Delete the `.pkl` to force a rebuild.
-3. **Corpus pulled from Chroma `.get()`** — same chunks as the vector index, exact parity.
-4. **Module-level lazy singleton** — loaded once per process lifetime (`_bundle` global). Repeated calls within a run don't reload from disk.
+### Tokenizer
+Abbreviation expansion (`R&D` → `research and development`, `SG&A` → `selling general and administrative`) runs *before* punctuation stripping, so ampersands don't collapse into near-zero-weight single-letter tokens.
 
-### Tokenizer (applied identically at build time and query time)
-
-```python
-_ABBREV_SUBS = [
-    # R&D — plain and HTML-encoded (&amp;)
-    (re.compile(r'r\s*&\s*amp\s*;\s*d',  re.IGNORECASE), 'research and development'),
-    (re.compile(r'r\s*&\s*d',             re.IGNORECASE), 'research and development'),
-    # SG&A — plain and HTML-encoded
-    (re.compile(r'sg\s*&\s*amp\s*;\s*a', re.IGNORECASE), 'selling general and administrative'),
-    (re.compile(r'sg\s*&\s*a',           re.IGNORECASE), 'selling general and administrative'),
-    # Generic fallback: &amp; and & -> "and"
-    (re.compile(r'&amp;', re.IGNORECASE), ' and '),
-    (re.compile(r'&'),                    ' and '),
-]
-# Pipeline: lowercase -> expand abbreviations -> strip punctuation -> split
-```
-
-**Why abbreviation expansion first**: `R&D` must expand to `research and development` *before* punctuation stripping. If punctuation is stripped first, `R&D` becomes `R`, `D` — tokens with near-zero BM25 weight.
-
-### Reciprocal Rank Fusion (RRF) Merge (`_rrf_merge()`)
-
+### RRF Merge
 ```
 RRF_score(chunk) = 1/(60 + rank_in_vector) + 1/(60 + rank_in_bm25)
 ```
+Run per company; chunks deduplicated by `chunk_id`; a chunk found by only one method still receives a score.
 
-- Both methods run **per company** (not across the corpus).
-- A chunk surfaced by only one method still gets a score — it is not dropped.
-- Chunks are deduplicated by `chunk_id`. The first retrieval method to encounter a chunk sets its text and metadata; subsequent encounters only add their RRF score contribution.
-
-### `bm25_query()` — Company Filtering
-
-BM25 scores ALL 3,063 chunks in the corpus, then filters to the requested company using the `metadata["company"]` field (always a populated full name). Returns a ranked list with `score`, `rank` (1-based within company), `text`, `metadata`, and `id`.
-
-### Chunk Budget per Query Type (`retrieve_node()`)
+### Chunk Budget per Query Type
 
 | Query Type | Vector k | BM25 top_k | Final k (after RRF) | Total Chunks |
 |---|---|---|---|---|
@@ -380,182 +355,254 @@ BM25 scores ALL 3,063 chunks in the corpus, then filters to the requested compan
 
 ## 8. Context Formatting — Cross-Company Safety
 
-Before any LLM call that uses retrieved chunks, `_format_context()` wraps each chunk in a company/section header:
-
-```
-=== APPLE INC. — Financial Statements and Supplementary Data ===
-[chunk text]
-
-=== MICROSOFT CORPORATION — Management's Discussion and Analysis ===
-[chunk text]
-```
-
-This prevents cross-company number contamination — the LLM always knows which company each figure belongs to.
+*(Unchanged.)* Every chunk fed to an LLM is wrapped in a company/section header (`=== APPLE INC. — Financial Statements ===`) to prevent cross-company number contamination.
 
 ---
 
-## 9. Prompt Engineering & LLM Nodes
+## 9. Multi-Session Conversational Memory — NEW
 
-### Router Prompt
-Classifies into exactly one of: `"retrieve"`, `"calculate"`, `"direct"`.
+### The Problem
+Follow-up questions ("What about their R&D expense?") arrive as bare, ambiguous strings. Without resolution, the router cannot classify them and company extraction returns `["all"]`, triggering a 36-chunk retrieval instead of the correct single-company lookup.
 
-**Key distinction**: `"retrieve"` covers all directly-stated figures (revenue, net income, R&D expense) — even ones that *sound* like math. `"calculate"` is reserved for arithmetic *on top of* stated figures (YoY growth rate, margin computation, cross-company comparison).
+### Architecture: Pre-Graph Context Resolution
+A `resolve_context()` step runs **before** the graph is invoked. It takes the raw question + the last `CONTEXT_WINDOW` (5) turns of session history and produces a fully self-contained, standalone question. The graph itself — every node, every prompt, every edge — is completely unchanged; it always receives a resolved question as if the user had typed it directly.
 
-**Returns**: A single word. Parsed by `parse_route()` which scans for keywords and defaults to `"retrieve"`.
+```
+User: "What about their R&D expense?"
+     ↓
+[Context Resolver — Groq 8B, temperature=0.0]  ← sees last 5 turns of history
+     ↓
+Resolved: "What was Apple's R&D expense?"
+     ↓
+[Existing Graph — unchanged]
+```
 
-### Company Extraction Prompt
-Extracts company names from the question. Handles the Google/Alphabet alias. Returns `["all"]` if no specific company is mentioned.
+This was chosen over two alternatives:
+- **Injecting full history into every prompt** — rejected: contaminates narrow, single-purpose prompts (router, grader, hallucination check) with thousands of tokens of irrelevant history, degrading their precision.
+- **LangGraph checkpointing (thread-based persistence)** — rejected: checkpointing solves *resuming an interrupted execution*, not *carrying resolved context between independent single-shot invocations*. `run_query()`'s single-shot invoke model isn't a natural fit for append-style threading.
 
-**Returns**: JSON array. Parsed defensively by `parse_companies()` (handles markdown code fences, falls back to `["all"]`).
+### Resolver Prompt Rules (validated via adversarial testing — see Section 14)
+- Pronoun resolution ("their", "the company") → substitute the correct company from history.
+- Metric-only follow-ups ("And net income?") → attach the most recent company.
+- **New-company follow-ups** ("What about Tesla?") → expand using the *metric* from the most recent turn, but explicitly do **not** carry over the previous company or inject a false comparison.
+- Explicit comparisons that are already self-contained → pass through **unchanged**, verbatim.
+- Standalone/definition questions → pass through unchanged.
+- `temperature=0.0` explicitly set on the Groq call.
 
-### Grade Prompt
-Evaluates retrieved chunks against the question. Critical rule: must verify every *listed* company has its specific figure — not just most of them.
+### Session Storage (`tools/session_store.py`)
+SQLite, WAL mode, two tables:
 
-**Returns**: Last line is `"yes"` or `"no"`. Parsed by `parse_grade()` (checks last line only).
+```sql
+CREATE TABLE sessions (
+    session_id    TEXT PRIMARY KEY,
+    created_at    TEXT NOT NULL,
+    title         TEXT,               -- auto-generated from first raw_question (truncated)
+    last_active   TEXT NOT NULL
+);
+CREATE TABLE turns (
+    turn_id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id         TEXT NOT NULL REFERENCES sessions(session_id),
+    turn_number        INTEGER NOT NULL,
+    raw_question       TEXT NOT NULL,   -- exactly what the user typed
+    resolved_question  TEXT NOT NULL,   -- what actually entered the graph
+    route              TEXT,
+    companies          TEXT,            -- JSON array
+    final_answer       TEXT,
+    error_message       TEXT,
+    created_at          TEXT NOT NULL,
+    UNIQUE(session_id, turn_number)
+);
+```
 
-### Rewrite Prompt
-Reformulates a failing query using standard financial statement terminology (e.g., "net sales", "total revenue", "operating income"). Strictly forbidden from adding year, section, or figure assumptions not in the original question.
+Both `raw_question` and `resolved_question` are stored — `raw` is the debugging ground truth if the resolver ever misfires; `resolved` is what the pipeline actually processed.
 
-**Returns**: Rewritten question string.
+### Generate Prompt Enhancement
+`generate_node` receives an optional `conversation_context` (last 2–3 Q&A pairs) purely for **conversational tone** — an explicit instruction forbids using it for facts:
 
-### Generate Prompt
-Answers using ONLY the provided context from 10-K filings. Must cite company and section for each figure. Explicitly forbidden from using training data for specific numbers.
+> *"...use this to understand the flow and adopt a natural conversational tone, but DO NOT use it for factual numbers — rely only on the provided 10-K Context for facts."*
 
-### Calculator Extraction Prompt
-Extracts `{operation, values}` JSON from context chunks. Contains critical rules:
-
-- **Percentage vs dollar comparison**: use `"difference"` for two percentages (not `"ratio"`).
-- **Consolidated figures rule**: always prefer consolidated company totals over segment-level figures.
-- **Missing company rule**: if a company's figure is absent, include it with `value: 0` and label ending in `" (not found in retrieved chunks)"` — never silently omit it.
-- **Ordering rules**: base/older/denominator listed first for `percent_change`, `difference`, `ratio`.
-- **Fallback**: returns `{"operation": "insufficient_data", "values": []}` if no valid numbers found.
-
-**Returns**: JSON object. Parsed by `parse_calculation()` using regex to extract `{...}` block (handles code fences and conversational text wrapping).
-
-### Hallucination Check Prompt
-Verifies every specific number, percentage, date, and financial figure in the answer exists in the source chunks. Reasons figure-by-figure, then writes final verdict on the last line.
-
-**Returns**: `"grounded"` or `"not_grounded"`. Parsed by `parse_hallucination()` — checks `"not_grounded"` BEFORE `"grounded"` (since `"grounded"` is a substring of `"not_grounded"`). Defaults to `"not_grounded"` on any parse failure.
-
-### Direct Answer Prompt
-Answers general finance/accounting concept questions (definitions, explanations) using the LLM's own knowledge. If the question actually requires specific company figures, the LLM is instructed to say so rather than guess.
+`calculator_node` intentionally does **not** receive `conversation_context` — its output is a rigid JSON schema, and conversational history would only risk contaminating structured extraction.
 
 ---
 
-## 10. Calculator Node — Two-Step Design
+## 10. Semantic Retrieval Cache — NEW
 
-Arithmetic never goes through an LLM. The `calculator_node()` uses a deliberate two-step design:
+### The Problem
+Hybrid retrieval (BM25 + vector + RRF) is not free — `["all"]` queries multiply into 9 ChromaDB calls + 9 corpus-wide BM25 scoring passes + 9 RRF merges. Repeated or paraphrased questions should reuse prior results rather than re-running full retrieval.
 
-1. **LLM extraction** (`calculator_extract_prompt`): identifies `{operation, values}` JSON from chunk text.
-2. **Python `compute()`** (`tools/calculator.py`): performs the actual math deterministically.
+### Composite Cache Key
+Three dimensions, evaluated in order — the first two are **exact-match hard filters**, the third is a similarity threshold applied *only within an already-matched category*:
 
-**Supported operations in `compute()`:**
+1. **`route`** — exact match ("retrieve" / "calculate")
+2. **`companies_mentioned`** — exact set match (sorted JSON array)
+3. **`metric_category`** — exact match, controlled vocabulary (see below)
+4. **Embedding similarity** (`CACHE_SIMILARITY_THRESHOLD = 0.88`) — distinguishes phrasing variation *within* the same company + route + metric
 
-| Operation | Behavior |
+**Why not pure embedding similarity alone (rejected approach):** validated by direct testing — "What was Apple's revenue?" vs. "What was Apple's operating income?" scores **0.9104** cosine similarity; "Amazon's revenue" vs. "Amazon's net income" scores **0.9476**. Same-company, different-metric pairs reliably clear a 0.88–0.95 threshold on sentence-structure similarity alone, which would produce dangerous cross-metric false-positive cache hits (e.g. serving revenue chunks for a net-income question). This is why `metric_category` was added as a hard, exact-match filter rather than folded into the similarity score.
+
+### `metric_category` Controlled Vocabulary
+Classified by the same 8B model call that already does company extraction (merged into a single `query_analysis_prompt`, avoiding a third LLM call per query):
+
+| Category | Covers |
 |---|---|
-| `percent_change` | `(new - old) / old * 100` — raises ValueError if base is 0 |
-| `difference` | `values[0] - values[1]` |
-| `sum` | Sum of all values |
-| `average` | Mean of all values |
-| `ratio` | `values[0] / values[1]` — raises ValueError if denominator is 0 |
-| `margin` | `(base - subtract) / base * 100` — e.g., gross margin |
-| `max` | Returns `{label, value}` dict of winner (never picks a 0-placeholder) |
-| `min` | Returns `{label, value}` dict of winner (never picks a 0-placeholder) |
+| `revenue_sales` | Revenue, Net Sales, Top Line |
+| `net_income_profit` | Net Income, Net Profit, Bottom Line |
+| `operating_income` | Operating Income, EBIT, Operating Margin |
+| `gross_profit` | Gross Profit, Gross Margin, COGS |
+| `cash_flow` | Operating/Free Cash Flow, Investing, Financing |
+| `assets_liabilities_equity` | Balance sheet items |
+| `r_and_d` | R&D Expense |
+| `s_g_and_a` | SG&A, Sales & Marketing, G&A |
+| `eps` | Earnings Per Share (basic/diluted) |
+| `business_description` | Business overview, product segments |
+| `risk_factors` | Risk factors, legal proceedings, competition |
+| `general` | Multi-metric, ambiguous, or non-fitting queries — **automatic cache bypass** |
 
-**Missing company handling**: `max`/`min` operations exclude `0`-placeholder entries (where label contains `"(not found in retrieved chunks)"`) from the winner selection, but still surface them as caveats in the final answer.
+**Safety rule:** any query classified as `general` bypasses the cache entirely (`get_cache()` and `put_cache()` both return early). A missed cache hit costs latency; a false hit on an ambiguous/multi-metric question risks serving a wrong financial figure — the system is biased toward the safer failure mode.
+
+### What the Cache Stores
+Retrieved **chunks**, not final answers:
+
+```sql
+CREATE TABLE retrieval_cache (
+    cache_id           TEXT PRIMARY KEY,
+    route              TEXT NOT NULL,
+    companies_json     TEXT NOT NULL,
+    metric_category    TEXT NOT NULL,
+    question_embedding BLOB NOT NULL,
+    resolved_question  TEXT NOT NULL,
+    chunks_json        TEXT NOT NULL,
+    sources_json       TEXT NOT NULL,
+    grade_result       TEXT NOT NULL,
+    created_at         TEXT NOT NULL,
+    hit_count          INTEGER DEFAULT 0
+);
+CREATE INDEX idx_cache_key ON retrieval_cache(route, companies_json, metric_category);
+```
+
+**Deliberate design decision:** caching chunks (not answers) means `generate`/`calculator` always runs fresh, and `hallucination_check` always verifies a newly-generated answer — the cache never lets an unverified or stale answer reach the user.
+
+**Cache write gating:** entries are only written when `grade_result == "yes"`. Chunks that failed grading are never cached — a slightly different phrasing on a subsequent query gets a genuine fresh retrieval rather than inheriting a known-bad result.
+
+### Cache Invalidation (Phase B3)
+Fully automatic, hash-based — no manual TTL, since the 10-K corpus is static until re-ingested.
+
+`_compute_corpus_hash()` incorporates:
+- All 6 model config values (`MODEL_ROUTER`, `MODEL_GRADER`, `MODEL_GENERATOR`, `MODEL_HALLUC`, `MODEL_REWRITE`, `MODEL_CALCULATOR`) + `TOP_K`
+- `chroma_db/chroma.sqlite3` file mtime (explicitly the file, not the containing directory — directory mtimes do not update on in-place file modification, which was caught and fixed during implementation)
+- `bm25_index.pkl` file mtime
+
+`_check_and_invalidate_cache()` runs on every import of `retrieval_cache.py`. If the computed hash differs from the stored value in the `cache_metadata` table, the entire `retrieval_cache` table is cleared and the new hash is stored. Verified via direct before/after testing (hash mismatch → log message → table cleared to 0 rows).
 
 ---
 
-## 11. Company Name Mapping (`tools/company_names.py`)
+## 11. FastAPI Layer (`api.py`) — NEW
 
-```python
-SHORT_TO_FULL = {
-    "Apple":     "Apple Inc.",
-    "Microsoft": "Microsoft Corporation",
-    "Amazon":    "Amazon.com Inc.",
-    "NVIDIA":    "NVIDIA Corporation",
-    "Tesla":     "Tesla Inc.",
-    "Meta":      "Meta Platforms Inc.",
-    "Alphabet":  "Alphabet Inc.",
-    "Google":    "Alphabet Inc.",   # alias — resolves to same filing
-    "Netflix":   "Netflix Inc.",
-    "Adobe":     "Adobe Inc.",
+REST API wrapping `run_session_query()`, designed as the stable contract for a future frontend.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | Returns `{"status": "ok"}` — frontend availability check |
+| `POST /sessions` | Creates a new session, returns `session_id` |
+| `GET /sessions` | Lists all sessions, ordered by `last_active` |
+| `GET /sessions/{session_id}/turns` | Returns full turn history for a session; 404 on invalid `session_id` |
+| `POST /sessions/{session_id}/query` | Primary query endpoint |
+
+**Query endpoint response contract:**
+
+```json
+{
+  "raw_question": "What about Tesla?",
+  "resolved_question": "What was Tesla's net income?",
+  "question_was_resolved": true,
+  "final_answer": "Tesla's net income in 2024 was $7,153 million.",
+  "cache_hit": false,
+  "chunk_sources": [{"company": "Tesla Inc.", "year": "2024", "section": "Item 8"}],
+  "error_message": null
 }
 ```
 
-`get_all_full_names()` returns `list(SHORT_TO_FULL.values())`. Note: `"Alphabet Inc."` appears twice (for both `"Alphabet"` and `"Google"` keys). For `["all"]` queries in `retrieve_node`, this causes two redundant Chroma + BM25 calls for Alphabet — no correctness impact, minor efficiency waste (see Known Issues).
+`question_was_resolved` is computed **entirely server-side** (`raw_question.strip() != resolved_question.strip()`) — the frontend never needs to perform this comparison itself, keeping frontend logic dumb and the resolver logic centralized.
+
+**CORS:** pinned explicitly to `http://localhost:3000` (not wildcarded) — flagged for further tightening before any real deployment.
+
+**Streaming decision:** token-by-token streaming was evaluated and **explicitly rejected**. Streaming would expose unverified text before `hallucination_check` runs; if the check subsequently fails, the user would have already read a potentially hallucinated answer with no clean way to retract it. The API remains a blocking JSON REST call. A future enhancement (not yet built) could add an SSE/WebSocket endpoint for status updates ("Resolving context...", "Retrieving...", "Checking for hallucinations...") without compromising this safety guarantee.
 
 ---
 
-## 12. Output Parsers (`tools/output_parsers.py`)
+## 12. Prompt Engineering & LLM Nodes
 
-All LLM outputs are wrapped in defensive parsers that normalize to exact expected strings:
+*(Router, Grade, Rewrite, Generate, Calculator Extraction, Hallucination Check, and Direct Answer prompts retain their original design intent from Sections 9–10 of the prior spec. Two changes:)*
 
-| Parser | Input | Output | Fallback |
-|---|---|---|---|
-| `parse_route()` | LLM route string | `"retrieve"/"calculate"/"direct"` | `"retrieve"` (safest) |
-| `parse_companies()` | LLM JSON array | `list[str]` | `["all"]` |
-| `parse_grade()` | LLM yes/no | `"yes"/"no"` | `"no"` |
-| `parse_hallucination()` | LLM grounded/not | `"grounded"/"not_grounded"` | `"not_grounded"` (safer) |
-| `parse_calculation()` | LLM JSON object | `{operation, values}` dict | `{"operation": "insufficient_data", "values": []}` |
+- **Router / Company Extraction prompt** was merged into `query_analysis_prompt`, now returning both `companies` and `metric_category` in one JSON object, in a single LLM call (avoiding a separate third call per query). Company-extraction accuracy was regression-tested after the merge to confirm no degradation from the added classification task.
+- **Generate Prompt** now optionally accepts `conversation_context`, with an explicit tone-only instruction (see Section 9).
+
+All original parsers (`parse_route`, `parse_grade`, `parse_hallucination`, `parse_calculation`) are unchanged. `parse_companies` was renamed/expanded to `parse_query_analysis`, returning `{companies, metric_category}`.
 
 ---
 
-## 13. Failure Mode Handling
+## 13. Calculator Node — Two-Step Design
 
-| Scenario | What Happens |
-|---|---|
-| Irrelevant chunks retrieved | `grade_node` returns `"no"` -> `rewrite_node` reformulates -> retry (up to `MAX_RETRY=3` times) |
-| Retries exhausted, still no relevant chunks | `grade_exhausted_warning_node` sets `error_message`; pipeline continues to generate/calculate with best available chunks |
-| Answer contains figures not in source chunks | `hallucination_check_node` returns `"not_grounded"` -> retry generate/calculate |
-| Hallucination retries exhausted | `hallucination_exhausted_node` writes honest failure message to `final_answer`; unverified answer is never exposed to the user |
-| Calculation: division by zero or wrong operation | `compute()` exception caught in `calculator_node`; descriptive error string returned as answer |
-| Missing company figure in multi-company calculation | Placeholder `value: 0` with `"(not found in retrieved chunks)"` label; excluded from `max`/`min` winner; surfaced as caveat in answer text |
-| Unknown company alias | `SHORT_TO_FULL.get(name)` returns `None`; that company is silently skipped in retrieve loop — caught downstream by grade returning `"no"` |
+*(Unchanged.)* Arithmetic never goes through an LLM: LLM extraction (`calculator_extract_prompt`, now on `MODEL_CALCULATOR`) identifies `{operation, values}`; Python `compute()` performs the math deterministically. Same 8 operations, same missing-company placeholder handling as original design.
 
 ---
 
-## 14. Development Status
+## 14. Testing & Validation Performed
 
-| Phase | Description | Status |
+| Component | Test | Result |
 |---|---|---|
-| Phase 1 | PDF extraction (Docling), chunking, embedding, ChromaDB | COMPLETE |
-| Phase 2 | Basic RAG — Retrieve + Generate + Hallucination Check | COMPLETE |
-| Phase 3 | Router node — retrieve / calculate / direct | COMPLETE |
-| Phase 4 | Grade + Rewrite retry loop | COMPLETE |
-| Phase 5 | Hallucination Check + retry/honest-failure fallback | COMPLETE |
-| Phase 6 | Multi-company queries (all 9 companies) | COMPLETE |
-| Phase 7 | Calculator — single and multi-company | COMPLETE |
-| Phase 8 | Hybrid Search — BM25 + Vector via RRF | COMPLETE |
-| Phase 9 | Streamlit UI | NOT STARTED |
+| Context resolver | 12-case adversarial suite (pronouns, new-company, comparisons, definitions, year shifts) | 12/12 passing |
+| Context resolver | 3x consistency reruns of all 12 cases (checking `temperature=0.0` determinism on Groq) | 36/36 consistent |
+| Semantic cache | 4 same-company/different-metric pairs (Microsoft, Alphabet, Apple, Amazon) | All correctly registered as cache **misses** post-fix |
+| Semantic cache | `general` bypass (multi-metric query) | Correctly bypassed cache on both first and repeat asks |
+| Semantic cache | `risk_factors` bypass/cache interaction | Confirmed cache-miss → cache-hit transition behaves correctly once resolved-question embeddings match |
+| Cache invalidation | Config value change (`TOP_K`, later `MODEL_CALCULATOR` addition) | Hash mismatch detected, cache cleared, verified via row-count before/after |
+| Cache invalidation | File-level vs. directory-level mtime bug | Caught during review — directory mtime doesn't update on in-place file changes; fixed to target `chroma.sqlite3` directly |
+| FastAPI layer | All 4 endpoints incl. 404 on invalid `session_id` | Verified via live `curl` tests |
+| Full multi-turn flow | 3-turn live session via API (base question → pronoun follow-up → new-company follow-up) | Resolved correctly at each turn, cache hit triggered appropriately |
 
 ---
 
-## 15. Known Issues & Open Decisions
+## 15. Known Issues & Deferred Items
 
-### Active Issues
+### Active / Deferred
 
-- **Chunk-Budget Competition (3+ Companies)**: At 9 companies x 4 slots = 36 chunks, budget competition occasionally lets a prose chunk out-compete the optimal table chunk for a given company. `grade_node` correctly rejects this, triggering rewrites — but the root cause is the fixed budget. Dynamic slot allocation (or raising `k`) remains an open decision.
+- **No temporal (year) dimension in the cache key.** The composite key covers `route` + `companies` + `metric_category` + embedding similarity, but has no concept of fiscal year. Currently low-risk because the corpus is single-year (FY2024) with multi-year comparative columns already present within each chunk — a same-metric-different-year "collision" likely still resolves to the same, correct chunk. **This will need to be revisited before any future multi-year ingestion** (e.g. adding FY2025 filings as separate documents), where it could become a genuine cross-year contamination risk.
 
-- **Error Propagation**: `grade_exhausted_warning_node` logs `error_message` internally, but it is not currently injected into `final_answer` for the user to see in the UI. (Deferred to Phase 9 UI.)
+- **`metric_category` vocabulary gaps:** no dedicated `tax_expense` category (effective tax rate questions likely fall into `general` and safely bypass, at the cost of cache benefit); no distinction between consolidated vs. segment/geographic revenue breakdowns within `revenue_sales` (both hash to the same category — a segment-revenue cache entry could theoretically be offered for a consolidated-revenue question, though the calculator's existing "prefer consolidated" rule provides a partial downstream safeguard).
 
-- **`get_all_full_names()` returns duplicates**: `"Alphabet Inc."` appears twice in the `SHORT_TO_FULL.values()` list (once for `"Alphabet"`, once for `"Google"` alias). For `["all"]` queries, `retrieve_node` makes two redundant Chroma + BM25 calls for Alphabet. No correctness impact, minor efficiency waste.
+- **Groq rate limits (new constraint introduced by the provider migration):** the free/dev tier enforces both per-minute limits (~30 RPM, ~6,000–14,000 TPM for 70B models) and a **100,000 tokens/day (TPD)** cap. `GROQ_MAX_RETRIES = 5` with SDK-level backoff mitigates transient 429s from the per-minute limits, but does **not** help once the daily cap is exhausted — this was hit directly during adversarial testing. A paid GroqCloud tier removes this ceiling; worth budgeting for before heavy frontend integration testing or live demos.
+
+- **Chunk-Budget Competition (3+ Companies):** at 9 companies × 4 slots = 36 chunks, budget competition occasionally lets a prose chunk out-compete the optimal table chunk for a given company. `grade_node` correctly rejects this and triggers a rewrite, but the root cause (fixed budget) remains. Dynamic slot allocation is an open decision.
+
+- **Error Propagation:** `grade_exhausted_warning_node` sets `error_message` internally; the FastAPI layer now surfaces this field in the query response, but the *future frontend* still needs to actually render it as a visible low-confidence warning.
+
+- **`get_all_full_names()` duplicate:** `"Alphabet Inc."` appears twice (once for `"Alphabet"`, once for the `"Google"` alias), causing two redundant Chroma + BM25 calls on `["all"]` queries. No correctness impact, minor efficiency waste.
 
 ### Resolved Issues (for reference)
 
-- **Tesla vs. NVIDIA percentage comparisons**: Fixed by the `"difference"` operation rule for comparing two percentage-based metrics.
-- **Google -> Alphabet mapping**: `SHORT_TO_FULL["Google"] = "Alphabet Inc."` alias fully resolves "Google" queries to the correct filing.
-- **R&D and SG&A abbreviations in BM25**: Handled by the ordered `_ABBREV_SUBS` expansion before punctuation stripping — `R&D` correctly expands to `research and development`.
+- **Same-company/different-metric cache false positives** — root-caused via direct embedding-similarity testing (0.90–0.95 cosine similarity between different-metric questions for the same company); fixed by adding `metric_category` as a hard exact-match filter rather than relying on embedding similarity alone.
+- **Directory-mtime cache invalidation bug** — caught before it caused a real incident; fixed to hash the actual `chroma.sqlite3` file.
+- **`MODEL_CALCULATOR` missing from the invalidation hash** — found and fixed during the Groq migration cleanup; verified with a before/after hash-change test.
+- **Tesla vs. NVIDIA percentage comparisons** — fixed by the `"difference"` operation rule for comparing two percentage-based metrics.
+- **Google → Alphabet mapping** — alias fully resolves "Google" queries to the correct filing.
+- **R&D and SG&A abbreviations in BM25** — handled by ordered `_ABBREV_SUBS` expansion before punctuation stripping.
+- **Context resolver: new-company questions returning unresolvable fragments** (e.g. "What about Tesla?" not expanding at all) — fixed via a RULE 4 prompt addition; validated across 12 adversarial cases and 3 consistency reruns.
+- **Context resolver: explicit comparisons being incorrectly rewritten** — fixed via an explicit "already self-contained" passthrough rule.
 
 ---
 
-## 16. Streamlit UI Design (Phase 9 — Not Started)
+## 16. Frontend (Deferred)
 
-Planned design principles:
-- **Status Display**: Use `st.status()` to show live execution steps (Router -> Retrieve -> Grade -> Generate).
-- **Source Disclosure**: Expandable "View sources used" panel showing chunk text, company, section label, and chunk type — to foster user trust.
-- **Honest Failures**: Never display a hallucinated or unverified answer. If `final_answer` comes from `hallucination_exhausted_node`, display: *"Unable to generate a verified answer. The model could not produce a response grounded in the 10-K documents."*
-- **Low-Confidence Warning**: If `error_message` is set (grade exhausted), display a visible warning alongside the answer.
+**Decision:** Streamlit (originally planned as Phase 9) was explicitly rejected. Given the production-grade ambitions of this project, a modern, custom frontend will be built separately instead — deferred pending Opus quota availability, and intentionally decoupled from the backend via the FastAPI contract in Section 11, so frontend work can proceed purely as a consumer of a stable, already-tested API.
+
+Design intentions for the eventual frontend (carried over from the original Phase 9 plan, to be revisited at build time):
+- Session sidebar (list/create/switch sessions)
+- Show `resolved_question` **only when `question_was_resolved` is true** — the cheapest safety net against an undetected resolver misfire reaching the user unnoticed
+- Expandable "sources used" panel driven by `chunk_sources`
+- Visible low-confidence warning when `error_message` is set
+- Honest-failure display when `final_answer` originates from `hallucination_exhausted_node`
+- Live status indicators (e.g. via a future SSE endpoint) rather than token streaming, per the streaming-safety decision in Section 11
 
 ---
 
@@ -572,3 +619,5 @@ Planned design principles:
 | Comparative — all companies | Which company had the highest R&D spend in 2024? | calculate |
 | Direct — definition | What does EBITDA stand for? | direct |
 | Direct — concept | What is the difference between gross profit and operating income? | direct |
+| Conversational follow-up | (after Apple revenue) "What about their R&D?" → resolved to "What was Apple's R&D expense?" | retrieve |
+| Conversational new-company | (after Apple margin question) "What about Tesla?" → resolved to "What was Tesla's gross margin?" | retrieve |
