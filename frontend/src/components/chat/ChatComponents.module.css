@@ -1,0 +1,369 @@
+/* Resolved Question Badge */
+.resolvedBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px solid var(--border-default);
+  font-size: 0.76rem;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+
+.resolvedIcon {
+  color: var(--accent-sole);
+  flex-shrink: 0;
+}
+
+.resolvedText {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+/* Sources Panel */
+.sourcesContainer {
+  margin-top: 12px;
+  border-top: 1px solid var(--border-default);
+  padding-top: 8px;
+}
+
+.sourcesHeader {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  transition: color var(--transition-fast);
+}
+
+.sourcesHeader:hover {
+  color: var(--text-primary);
+}
+
+.sourcesTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.titleIcon {
+  color: var(--accent-sole);
+}
+
+.sourcesList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.sourceCard {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.sourceCard:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-surface-hover);
+}
+
+.sourceCardExpanded {
+  border-color: var(--accent-sole);
+  grid-column: 1 / -1;
+}
+
+.sourceCompanyRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.companyIcon {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.sourceCompany {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.tickerTag {
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.chunkTypeBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.sourceTag {
+  font-size: 0.68rem;
+  font-family: var(--font-mono);
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: transparent;
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.sourceTitleRow {
+  padding: 2px 0;
+}
+
+.displayTitle {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sourceMeta {
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.chunkIdText {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+.cardFooterHint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.68rem;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border-default);
+}
+
+.sourceCard:hover .cardFooterHint {
+  color: var(--accent-sole);
+}
+
+/* Expanded Inspector Drawer */
+.expandedDrawer {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.drawerHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--accent-sole);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border-default);
+  padding-bottom: 4px;
+}
+
+.drawerIcon {
+  color: var(--accent-sole);
+}
+
+.drawerGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.drawerItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.drawerLabel {
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.drawerVal {
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.drawerCode {
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  padding: 2px 6px;
+  border: 1px solid var(--border-default);
+  border-radius: 2px;
+  word-break: break-all;
+}
+
+/* Low-Confidence Warning Card - Dashed Metadata Gray Left Border (#8B8D94), No Fill */
+.warningCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-left: 3px dashed var(--text-secondary);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+}
+
+.warningHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.warningIcon {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.warningLabel {
+  font-size: 0.76rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.warningText {
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+/* Honest Failure Card - Dashed Metadata Gray Left Border (#8B8D94), Alert Circle Icon */
+.honestFailureCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-left: 3px dashed var(--text-secondary);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+}
+
+.honestFailureHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.failureIcon {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.honestFailureLabel {
+  font-size: 0.76rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.todoBadge {
+  margin-left: auto;
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  padding: 1px 5px;
+  border-radius: 2px;
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+}
+
+.honestFailureBody {
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+/* Status Indicator */
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  font-size: 0.76rem;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+  color: var(--accent-sole);
+}
+
+.stageIcon {
+  color: var(--accent-sole);
+}
+
+.statusText {
+  font-weight: 500;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

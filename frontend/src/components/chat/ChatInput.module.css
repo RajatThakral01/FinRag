@@ -1,0 +1,131 @@
+.inputWrapper {
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 14px 20px 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chipsRow {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.chipsRow::-webkit-scrollbar {
+  display: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.76rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.chip:hover:not(:disabled) {
+  background: var(--bg-surface-hover);
+  border-color: var(--border-accent);
+  color: var(--text-main);
+}
+
+.chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chipIcon {
+  color: var(--accent-emerald);
+}
+
+.inputForm {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 8px 10px 8px 14px;
+  box-shadow: var(--shadow-card);
+  transition: border-color var(--transition-fast);
+}
+
+.inputForm:focus-within {
+  border-color: var(--border-accent);
+}
+
+.textarea {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-main);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  resize: none;
+  max-height: 160px;
+  padding: 4px 8px 4px 0;
+  font-family: var(--font-sans);
+}
+
+.textarea::placeholder {
+  color: var(--text-dim);
+}
+
+.sendButton {
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background-color: var(--bg-surface-hover);
+  border: 1px solid var(--border-accent);
+  color: var(--accent-emerald);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-bottom: 1px;
+  transition: all var(--transition-fast);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.sendButton:hover:not(:disabled) {
+  background-color: var(--accent-emerald-bg);
+  border-color: var(--accent-emerald);
+}
+
+.sendButton:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.sendButton:disabled {
+  border-color: var(--border-subtle);
+  color: var(--text-dim);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.btnText {
+  display: inline;
+}
+
+.inputFooterText {
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  text-align: center;
+  letter-spacing: 0.02em;
+}

@@ -1,0 +1,139 @@
+.container {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-dark);
+  position: relative;
+  overflow: hidden;
+}
+
+.scrollArea {
+  flex: 1;
+  overflow-y: auto;
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.centerNotice {
+  margin: auto;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+}
+
+.welcomeHero {
+  margin: auto;
+  max-width: 620px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 40px 20px;
+}
+
+.heroBadge {
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-emerald-bg);
+  border: 1px solid var(--border-accent);
+  color: var(--accent-emerald);
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.heroTitle {
+  font-family: var(--font-display);
+  font-size: 2.2rem;
+  font-weight: 600;
+  color: var(--text-main);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.heroSubtitle {
+  font-size: 0.92rem;
+  color: var(--text-muted);
+  line-height: 1.65;
+  font-family: var(--font-sans);
+}
+
+.statusRow {
+  max-width: 860px;
+  width: 100%;
+  margin: 0 auto 18px auto;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.errorAlert {
+  max-width: 860px;
+  width: 100%;
+  margin: 0 auto 18px auto;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background-color: var(--status-error-bg);
+  border: 1px solid var(--status-error-border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-main);
+}
+
+.errorIcon {
+  color: var(--status-error);
+  flex-shrink: 0;
+}
+
+.errorContent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.errorTitle {
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--status-error);
+  text-transform: uppercase;
+}
+
+.errorText {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.retryBtn {
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background-color var(--transition-fast);
+}
+
+.retryBtn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.inputContainer {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-default);
+  background: var(--bg-app);
+}

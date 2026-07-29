@@ -62,7 +62,7 @@ BM25_INDEX_PATH    = "./bm25_index.pkl"
 
 # --- LLM model roles (Groq) ---
 MODEL_ROUTER       = "llama-3.1-8b-instant"        # fast — routing + company/metric extraction
-MODEL_GRADER       = "llama-3.3-70b-versatile"     # per-company relevance reasoning
+MODEL_GRADER       = "llama-3.1-8b-instant"        # per-company relevance reasoning
 MODEL_GENERATOR    = "llama-3.3-70b-versatile"     # main answer generation
 MODEL_HALLUC       = "llama-3.1-8b-instant"        # binary groundedness verification
 MODEL_REWRITE      = "llama-3.1-8b-instant"        # query reformulation
@@ -240,7 +240,7 @@ class GraphState(TypedDict):
 | `cache_lookup` | `cache_lookup_node()` | embedding only | Composite-key semantic cache check — **NEW** |
 | `router` | `router_node()` | 8B | Classify route + extract companies + classify `metric_category` (merged into one call) |
 | `retrieve` | `retrieve_node()` | — | Hybrid BM25+Vector search, RRF merge per company (skipped on cache hit) |
-| `grade` | `grade_node()` | 70B | Per-company relevance check (skipped on cache hit) |
+| `grade` | `grade_node()` | 8B | Per-company relevance check (skipped on cache hit) |
 | `rewrite` | `rewrite_node()` | 8B | Reformulate question with standard financial terminology |
 | `generate` | `generate_node()` | 70B | Synthesize answer from labeled context chunks; now also receives `conversation_context` for tone |
 | `calculator` | `calculator_node()` | 70B (`MODEL_CALCULATOR`) | Extract numbers from chunks → Python `compute()` |
@@ -584,6 +584,7 @@ All original parsers (`parse_route`, `parse_grade`, `parse_hallucination`, `pars
 - **Same-company/different-metric cache false positives** — root-caused via direct embedding-similarity testing (0.90–0.95 cosine similarity between different-metric questions for the same company); fixed by adding `metric_category` as a hard exact-match filter rather than relying on embedding similarity alone.
 - **Directory-mtime cache invalidation bug** — caught before it caused a real incident; fixed to hash the actual `chroma.sqlite3` file.
 - **`MODEL_CALCULATOR` missing from the invalidation hash** — found and fixed during the Groq migration cleanup; verified with a before/after hash-change test.
+- **Grader false-negatives on simple queries** — found that `llama-3.3-70b-versatile` self-contradicted on trivial grading tasks (outputting "no" despite explicitly reasoning that the chunks contained the data). This was an instruction-tuning artifact related to the negative-constraint framing in `grade_prompt`. Downgraded `MODEL_GRADER` to `llama-3.1-8b-instant`, which was verified to handle the same task correctly (and much more cheaply), passing both borderline-chunk and multi-company adversarial cases flawlessly.
 - **Tesla vs. NVIDIA percentage comparisons** — fixed by the `"difference"` operation rule for comparing two percentage-based metrics.
 - **Google → Alphabet mapping** — alias fully resolves "Google" queries to the correct filing.
 - **R&D and SG&A abbreviations in BM25** — handled by ordered `_ABBREV_SUBS` expansion before punctuation stripping.
