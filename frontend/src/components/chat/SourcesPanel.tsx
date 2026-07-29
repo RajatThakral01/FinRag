@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronUp, FileCode, Building, Table, AlignLeft, Info } from 'lucide-react';
+import { ChevronDown, ChevronUp, FileCode, Building, Table, AlignLeft, Info, Eye } from 'lucide-react';
 import type { ChunkSource } from '../../api/types';
 import styles from './ChatComponents.module.css';
 
 interface SourcesPanelProps {
   sources: ChunkSource[];
+  onSelectChunk?: (chunkId: string) => void;
 }
 
-export const SourcesPanel: React.FC<SourcesPanelProps> = ({ sources }) => {
+export const SourcesPanel: React.FC<SourcesPanelProps> = ({ sources, onSelectChunk }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
@@ -77,20 +78,36 @@ export const SourcesPanel: React.FC<SourcesPanelProps> = ({ sources }) => {
                   <span className={styles.sourceTag}>FY{year}</span>
                 </div>
 
-                {/* Distinct Title & Table/Section Name (Fixes Bug 1) */}
+                {/* Distinct Title & Table/Section Name */}
                 <div className={styles.sourceTitleRow}>
                   <span className={styles.displayTitle}>{displayTitle}</span>
                 </div>
 
-                {/* Monospace Chunk ID & Section */}
+                {/* Monospace Chunk ID */}
                 <div className={styles.sourceMeta}>
                   <span className={styles.chunkIdText}>ID: {chunkId}</span>
                 </div>
 
-                {/* Expand Indicator (Fixes Bug 2) */}
-                <div className={styles.cardFooterHint}>
-                  <span>{isExpanded ? 'Hide audit details' : 'Click to inspect excerpt metadata'}</span>
-                  {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                {/* Action Bar: Show full chunk button & Metadata Expand */}
+                <div className={styles.cardFooterRow}>
+                  <button
+                    className={styles.fullChunkBtn}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (onSelectChunk && chunkId) {
+                        onSelectChunk(chunkId);
+                      }
+                    }}
+                    title="Open full chunk slide-in preview panel"
+                  >
+                    <Eye size={12} />
+                    <span>Show full chunk</span>
+                  </button>
+
+                  <div className={styles.cardFooterHint}>
+                    <span>{isExpanded ? 'Hide metadata' : 'Inspect metadata'}</span>
+                    {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                  </div>
                 </div>
 
                 {/* Expanded Excerpt Metadata Drawer */}

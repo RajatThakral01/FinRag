@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 
 from tools.session_store import create_session, list_sessions, get_session
+from tools.vectorstore import get_vectorstore
 import sqlite3
 import config
 from graph.graph import run_session_query
@@ -95,6 +96,31 @@ def submit_query(session_id: str, request: QueryRequest):
         "chunk_sources": final_state.get("chunk_sources", []),
         "error_message": final_state.get("error_message")
     }
+
+@app.get("/chunks/{chunk_id}")
+def get_chunk_by_id(chunk_id: str):
+    """
+    Retrieve full text and metadata for a specific chunk ID from ChromaDB.
+    """
+    try:
+        vs = get_vectorstore()
+        res = vs._collection.get(where={"chunk_id": chunk_id})
+        
+        if not res or not res.get("documents") or len(res["documents"]) == 0:
+            raise HTTPException(status_code=404, detail=f"Chunk '{chunk_id}' not found.")
+            
+        if len(res["documents"]) > 1:
+            print(f"[WARNING] chunk_id collision for '{chunk_id}': {len(res['documents'])} matches found in Chroma collection")
+            
+        return {
+            "chunk_id": chunk_id,
+            "text": res["documents"][0],
+            "metadata": res["metadatas"][0] if res.get("metadatas") else {}
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

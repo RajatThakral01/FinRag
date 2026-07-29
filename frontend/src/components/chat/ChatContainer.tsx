@@ -5,6 +5,7 @@ import { api } from '../../api/client';
 import { MessageBubble, type ChatMessage } from './MessageBubble';
 import { StatusIndicator } from './StatusIndicator';
 import { ChatInput } from './ChatInput';
+import { ChunkPreviewPanel } from './ChunkPreviewPanel';
 import styles from './ChatContainer.module.css';
 
 export const ChatContainer: React.FC = () => {
@@ -13,6 +14,7 @@ export const ChatContainer: React.FC = () => {
   const [isLoadingTurns, setIsLoadingTurns] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [queryError, setQueryError] = useState<string | null>(null);
+  const [activeChunkId, setActiveChunkId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -27,6 +29,7 @@ export const ChatContainer: React.FC = () => {
   useEffect(() => {
     if (!activeSessionId) {
       setMessages([]);
+      setActiveChunkId(null);
       return;
     }
 
@@ -145,7 +148,13 @@ export const ChatContainer: React.FC = () => {
             </p>
           </div>
         ) : (
-          messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)
+          messages.map((msg) => (
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              onSelectChunk={(chunkId) => setActiveChunkId(chunkId)}
+            />
+          ))
         )}
 
         {/* Pending Query Status Indicator */}
@@ -176,6 +185,12 @@ export const ChatContainer: React.FC = () => {
       <div className={styles.inputContainer}>
         <ChatInput onSubmit={handleQuerySubmit} isLoading={isSubmitting} />
       </div>
+
+      {/* Full Chunk Slide-in Preview Panel */}
+      <ChunkPreviewPanel
+        chunkId={activeChunkId}
+        onClose={() => setActiveChunkId(null)}
+      />
     </div>
   );
 };

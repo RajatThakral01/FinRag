@@ -62,3 +62,19 @@ export interface TurnItem {
   error_message: string | null;
   created_at: string;
 }
+
+export interface ChunkDetailResponse {
+  chunk_id: string;
+  text: string;
+  metadata: {
+    company?: string;
+    ticker?: string;
+    year?: string;
+    section_name?: string;
+    table_name?: string;
+    chunk_type?: string;
+    block_idx?: number;
+    parent_chunk_id?: string;
+    [key: string]: any;
+  };
+}

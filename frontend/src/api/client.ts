@@ -4,6 +4,7 @@ import type {
   SessionSummary,
   TurnItem,
   QueryResponse,
+  ChunkDetailResponse,
 } from './types';
 
 const API_BASE_URL =
@@ -79,5 +80,15 @@ export const api = {
       }
     );
     return handleResponse<QueryResponse>(res);
+  },
+
+  /**
+   * Fetch full chunk text and metadata by chunk_id
+   */
+  async getChunk(chunkId: string): Promise<ChunkDetailResponse> {
+    const res = await fetch(
+      `${API_BASE_URL}/chunks/${encodeURIComponent(chunkId)}`
+    );
+    return handleResponse<ChunkDetailResponse>(res);
   },
 };

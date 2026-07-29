@@ -166,20 +166,48 @@
   display: block;
 }
 
-.cardFooterHint {
+.cardFooterRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 0.68rem;
-  font-family: var(--font-mono);
-  color: var(--text-secondary);
+  gap: 8px;
   margin-top: 4px;
   padding-top: 4px;
   border-top: 1px dashed var(--border-default);
 }
 
-.sourceCard:hover .cardFooterHint {
+.fullChunkBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.68rem;
+  font-family: var(--font-mono);
+  font-weight: 500;
   color: var(--accent-sole);
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: 2px 7px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.fullChunkBtn:hover {
+  background: rgba(140, 160, 199, 0.1);
+  border-color: var(--accent-sole);
+}
+
+.cardFooterHint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.68rem;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.sourceCard:hover .cardFooterHint {
+  color: var(--text-primary);
 }
 
 /* Expanded Inspector Drawer */
