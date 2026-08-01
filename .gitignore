@@ -1,26 +1,45 @@
-# Virtual environments
+# ── Python ────────────────────────────────────────────────
 venv/
 .venv/
 venv_docling_test/
-
-# Python
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyc
 
-# Diagnostic / Scratch files
-scratch_*.py
-bm25_index.pkl
-
 # Environment variables
 .env
 
-# macOS
-.DS_Store
-
-# Vector database
+# Generated / large binary artifacts
+bm25_index.pkl
 chroma_db/
-
-# Generated extracted text
 extracted_text/
+
+# Diagnostic / scratch files
+scratch_*.py
+
+# ── Node / Frontend ───────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ── Editor & OS ───────────────────────────────────────────
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
