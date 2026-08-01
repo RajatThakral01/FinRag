@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { api } from '../api/client';
-import type { SessionSummary } from '../api/types';
+import { api } from './api/client';
+import type { SessionSummary } from './api/types';
 
 interface SessionContextType {
   sessions: SessionSummary[];

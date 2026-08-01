@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
-import { useSessionContext } from '../../context/SessionContext';
+import { useSessionContext } from '../../SessionContext';
 import { api } from '../../api/client';
 import { MessageBubble, type ChatMessage } from './MessageBubble';
 import { StatusIndicator } from './StatusIndicator';

@@ -645,7 +645,7 @@ The `chroma_db/` and `bm25_index.pkl` files are pre-built and included. To add n
 
 ```bash
 # Extract text from PDFs (requires Docling)
-python text_extractor.py
+python ingestion/text_extractor.py
 
 # Re-ingest: chunk, embed, and store
 python ingestion/embed_and_store.py

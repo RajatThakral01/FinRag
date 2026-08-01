@@ -1,6 +1,6 @@
 import React from 'react';
 import { Plus, FileBarChart, Layers } from 'lucide-react';
-import { useSessionContext } from '../../context/SessionContext';
+import { useSessionContext } from '../../SessionContext';
 import { SessionItem } from './SessionItem';
 import { HealthBadge } from '../common/HealthBadge';
 import styles from './SessionSidebar.module.css';

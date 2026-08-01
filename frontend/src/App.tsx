@@ -1,5 +1,5 @@
 import React from 'react';
-import { SessionProvider } from './context/SessionContext';
+import { SessionProvider } from './SessionContext';
 import { SessionSidebar } from './components/sidebar/SessionSidebar';
 import { ChatContainer } from './components/chat/ChatContainer';
 import './styles/global.css';

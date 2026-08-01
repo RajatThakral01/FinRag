@@ -1,5 +1,5 @@
 """
-tools/bm25_index.py
+tools/retrieval/bm25_index.py
 -------------------
 Builds and caches a BM25Okapi index over the full Chroma corpus (all 9
 companies, 3,063 chunks), then exposes a query function that scores every
@@ -18,14 +18,9 @@ directly back to the correct chunk and its metadata without any re-fetch.
 import os
 import re
 import pickle
-import sys
-
-# Allow running standalone from project root
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 from rank_bm25 import BM25Okapi
 import config
-from tools.vectorstore import get_vectorstore
+from tools.retrieval.vectorstore import get_vectorstore
 
 
 # ---------------------------------------------------------------------------
