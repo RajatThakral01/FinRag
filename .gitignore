@@ -15,6 +15,9 @@ bm25_index.pkl
 chroma_db/
 extracted_text/
 
+# Design / specification documents (local reference only)
+Financial_RAG_Project_Spec.md
+
 # Diagnostic / scratch files
 scratch_*.py
 
