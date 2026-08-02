@@ -95,6 +95,19 @@ function renderMarkdown(text: string): React.ReactNode[] {
   return nodes;
 }
 
+// Format ISO timestamp as HH:MM for today, or MMM D · HH:MM for older dates
+function formatTimestamp(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const isToday =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (isToday) return time;
+  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} · ${time}`;
+}
+
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onSelectChunk }) => {
   const isUser = message.sender === 'user';
 
@@ -109,13 +122,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onSelectC
       <div className={styles.bubbleContainer}>
         {/* Header Metadata */}
         <div className={styles.metaRow}>
-          <span className={styles.senderName}>
-            {isUser ? 'ANALYST QUERY' : 'SEC 10-K VERIFICATION DOSSIER'}
-          </span>
-          {!isUser && message.cacheHit && (
-            <span className={styles.cacheHitBadge} title="Answer retrieved from verified semantic cache">
-              <CheckCircle2 size={11} /> Cache Verified
+          <div className={styles.metaLeft}>
+            <span className={styles.senderName}>
+              {isUser ? 'ANALYST QUERY' : 'SEC 10-K VERIFICATION DOSSIER'}
             </span>
+            {!isUser && message.cacheHit && (
+              <span className={styles.cacheHitBadge} title="Answer retrieved from verified semantic cache">
+                <CheckCircle2 size={11} /> Cache Verified
+              </span>
+            )}
+          </div>
+          {message.timestamp && (
+            <span className={styles.timestamp}>{formatTimestamp(message.timestamp)}</span>
           )}
         </div>
 

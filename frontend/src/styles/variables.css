@@ -57,3 +57,9 @@
   --transition-fast: 150ms ease;
   --transition-smooth: 200ms ease;
 }
+
+@media (max-width: 1280px) {
+  :root {
+    --sidebar-width: 240px;
+  }
+}

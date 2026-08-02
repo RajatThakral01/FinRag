@@ -57,11 +57,25 @@
 .metaRow {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   font-size: 0.68rem;
   font-family: var(--font-mono);
   color: var(--text-secondary);
   letter-spacing: 0.04em;
+}
+
+.metaLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timestamp {
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  flex-shrink: 0;
 }
 
 .senderName {
