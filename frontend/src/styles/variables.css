@@ -23,8 +23,12 @@
   /* Sole Accent (Verification, Links, Active States, Primary CTA) */
   --accent-sole: #8ca0c7;
   --accent-primary: #8ca0c7;
-  --accent-emerald: #8ca0c7;
+  --accent-emerald: #8ca0c7;           /* alias — keeps sidebar references valid */
   --accent-amber: #ededee; /* Financial numbers render in primary text color */
+
+  /* Accent backgrounds / borders (used by sidebar button + logo icon) */
+  --accent-emerald-bg: rgba(140, 160, 199, 0.08);  /* very subtle tinted surface */
+  --border-accent: #33353b;                          /* alias to border-strong */
 
   /* Semantic State Colors (Grayscale / Neutral Borders Only) */
   --status-warning: #8b8d94;

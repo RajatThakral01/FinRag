@@ -23,7 +23,7 @@ export const SessionSidebar: React.FC = () => {
       <div className={styles.header}>
         <div className={styles.logoRow}>
           <div className={styles.logoIcon}>
-            <FileBarChart size={18} color="#2dd4bf" />
+            <FileBarChart size={18} style={{ color: 'var(--accent-sole)' }} />
           </div>
           <div>
             <h1 className={styles.logoTitle}>FinRAG Terminal</h1>
