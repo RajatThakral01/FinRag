@@ -121,3 +121,33 @@
     transform: translateY(0);
   }
 }
+
+/* Markdown-rendered element styles */
+.mdParagraph {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.mdSpacer {
+  height: 0.6em;
+}
+
+.mdList {
+  margin: 4px 0;
+  padding-left: 1.4em;
+  line-height: 1.6;
+}
+
+.mdList li {
+  margin-bottom: 2px;
+}
+
+.textBody strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.textBody em {
+  font-style: italic;
+  color: var(--text-secondary);
+}

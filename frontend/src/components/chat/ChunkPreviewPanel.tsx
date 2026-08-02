@@ -9,6 +9,65 @@ interface ChunkPreviewPanelProps {
   onClose: () => void;
 }
 
+// ---------------------------------------------------------------------------
+// Pipe-table parser — converts markdown table syntax into <table> JSX.
+// Detects tables by checking if ≥50% of non-empty lines start with '|'.
+// ---------------------------------------------------------------------------
+function isPipeTable(text: string): boolean {
+  const lines = text.split('\n').filter((l) => l.trim().length > 0);
+  if (lines.length < 2) return false;
+  const pipeLines = lines.filter((l) => l.trim().startsWith('|'));
+  return pipeLines.length / lines.length >= 0.5;
+}
+
+function parsePipeTable(text: string): React.ReactNode {
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  const rows: string[][] = lines
+    .filter((l) => !l.match(/^\|[-| :]+\|?$/)) // skip separator rows (|---|---|)
+    .map((l) =>
+      l
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split('|')
+        .map((cell) => cell.trim())
+    );
+
+  if (rows.length === 0) return <pre className={styles.proseContent}>{text}</pre>;
+
+  const [header, ...body] = rows;
+
+  return (
+    <div className={styles.tableWrapper}>
+      <table className={styles.dataTable}>
+        <thead>
+          <tr>
+            {header.map((cell, i) => (
+              <th key={i} className={styles.th}>
+                {cell}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {body.map((row, ri) => (
+            <tr key={ri} className={ri % 2 === 0 ? styles.trEven : styles.trOdd}>
+              {row.map((cell, ci) => (
+                <td key={ci} className={`${styles.td} ${ci > 0 ? styles.tdNum : styles.tdLabel}`}>
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export const ChunkPreviewPanel: React.FC<ChunkPreviewPanelProps> = ({
   chunkId,
   onClose,
@@ -53,6 +112,7 @@ export const ChunkPreviewPanel: React.FC<ChunkPreviewPanelProps> = ({
   if (!chunkId) return null;
 
   const meta = data?.metadata || {};
+  const isTable = meta.chunk_type?.toUpperCase() === 'TABLE';
 
   return (
     <aside className={styles.panel} aria-label="Chunk Preview Panel">
@@ -120,9 +180,11 @@ export const ChunkPreviewPanel: React.FC<ChunkPreviewPanelProps> = ({
                 {meta.section_name} {meta.table_name ? `— ${meta.table_name}` : ''}
               </div>
             )}
-            <div className={styles.proseContent}>
-              {data.text}
-            </div>
+            {/* Render as a proper table for TABLE chunks, prose otherwise */}
+            {isTable && isPipeTable(data.text)
+              ? parsePipeTable(data.text)
+              : <div className={styles.proseContent}>{data.text}</div>
+            }
           </>
         ) : null}
       </div>
