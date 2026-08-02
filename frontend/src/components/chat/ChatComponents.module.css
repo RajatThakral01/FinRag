@@ -391,6 +391,12 @@
   font-weight: 500;
 }
 
+.slowNote {
+  color: var(--text-dim);
+  font-style: italic;
+  font-weight: 400;
+}
+
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
