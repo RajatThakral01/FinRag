@@ -9,7 +9,8 @@ def parse_hallucination(llm_output: str) -> str:
     Defaults to 'not_grounded': safer to treat an unparseable response
     as unverified than to risk certifying a hallucinated answer as final.
     """
-    last_line = llm_output.strip().split("\n")[-1].strip().lower()
+    lines = llm_output.strip().splitlines()
+    last_line = lines[-1].strip().lower() if lines else ""
     if "not_grounded" in last_line:
         return "not_grounded"
     elif "grounded" in last_line:
