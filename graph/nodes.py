@@ -158,7 +158,7 @@ def generate_node(state: GraphState) -> dict:
     else:
         conv_text = ""
 
-    llm = ChatGroq(model=config.MODEL_CALCULATOR, groq_api_key=config.GROQ_API_KEY, max_retries=config.GROQ_MAX_RETRIES, temperature=0.0)
+    llm = ChatGroq(model=config.MODEL_GENERATOR, groq_api_key=config.GROQ_API_KEY, max_retries=config.GROQ_MAX_RETRIES, temperature=0.0)
     chain = generate_prompt | llm
 
     response = chain.invoke({
