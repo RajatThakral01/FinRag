@@ -1,5 +1,8 @@
 from langgraph.graph import StateGraph, END
 
+import config
+from tools.session.session_store import get_history, add_turn
+from tools.session.context_resolver import resolve_context, _format_history
 from graph.state import GraphState, create_initial_state
 from graph.nodes import (
     router_node,
@@ -119,10 +122,6 @@ def run_session_query(session_id: str, raw_question: str) -> tuple[GraphState, s
     The resolved_question is EXACTLY what was passed to create_initial_state()
     and entered the graph — not a summarized or re-processed version.
     """
-    import config
-    from tools.session_store import get_history, add_turn
-    from tools.context_resolver import resolve_context, _format_history
-
     history = get_history(session_id, last_n=config.CONTEXT_WINDOW)
     resolved_question = resolve_context(raw_question, history)
     
