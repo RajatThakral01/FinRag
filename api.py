@@ -3,9 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 
-from tools.session.session_store import create_session, list_sessions, get_session
+from tools.session.session_store import (
+    create_session, list_sessions, get_session,
+    update_session_title, get_history,
+)
 from tools.retrieval.vectorstore import get_vectorstore
-import sqlite3
 import config
 from graph.graph import run_session_query
 
@@ -40,11 +42,10 @@ def health_check():
 def create_new_session(request: Optional[SessionCreateRequest] = None):
     """Create a new session and return its ID."""
     session_id = create_session()
-    # If the request contains a title, update it manually, otherwise it's auto-generated later
+    # If the request contains a title, update via session_store (uses WAL connection)
     if request and request.title:
-        with sqlite3.connect(config.SESSION_DB_PATH, check_same_thread=False) as conn:
-            conn.execute("UPDATE sessions SET title = ? WHERE session_id = ?", (request.title, session_id))
-    
+        update_session_title(session_id, request.title)
+
     session_data = get_session(session_id)
     return {
         "session_id": session_id,
@@ -58,17 +59,13 @@ def get_all_sessions():
 
 @app.get("/sessions/{session_id}/turns")
 def get_session_turns(session_id: str):
-    """List all turns for a specific session."""
+    """List all turns for a specific session, ordered oldest-first."""
     session = get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found.")
-        
-    # Get all turns manually to avoid circular imports or exposing internal functions directly if not imported
-    with sqlite3.connect(config.SESSION_DB_PATH, check_same_thread=False) as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute("SELECT * FROM turns WHERE session_id = ? ORDER BY turn_number ASC", (session_id,)).fetchall()
-        
-    return [dict(r) for r in rows]
+
+    # Use session_store.get_history() — WAL-mode connection, companies_json parsed automatically
+    return get_history(session_id, last_n=None)
 
 @app.post("/sessions/{session_id}/query")
 def submit_query(session_id: str, request: QueryRequest):

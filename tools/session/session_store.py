@@ -88,6 +88,15 @@ def get_session(session_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def update_session_title(session_id: str, title: str) -> None:
+    """Update the title of an existing session."""
+    with _get_conn() as conn:
+        conn.execute(
+            "UPDATE sessions SET title = ? WHERE session_id = ?",
+            (title, session_id),
+        )
+
+
 def list_sessions() -> list[dict]:
     """Return all sessions ordered by most recently active first."""
     with _get_conn() as conn:
