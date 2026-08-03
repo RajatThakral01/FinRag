@@ -17,10 +17,11 @@ def parse_hallucination(llm_output: str) -> str:
     return "not_grounded"
 
 def parse_grade(llm_output: str) -> str:
-    last_line = llm_output.strip().splitlines()[-1].strip().lower()
+    lines = llm_output.strip().splitlines()
+    last_line = lines[-1].strip().lower() if lines else ""
     if "yes" in last_line:
         return "yes"
-    return "no" 
+    return "no"
 
 def parse_query_analysis(llm_output: str) -> dict:
     text = llm_output.strip()
