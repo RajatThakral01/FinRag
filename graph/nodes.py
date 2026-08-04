@@ -480,6 +480,60 @@ def _chunks_to_state(docs: list) -> tuple[list[str], list[dict]]:
     return texts, sources
 
 
+# ---------------------------------------------------------------------------
+# Section-relevance filter — strips off-topic sections before RRF
+# ---------------------------------------------------------------------------
+
+# Sections that contain legal/procedural boilerplate and almost never hold
+# the financial figures or narrative that retrieve queries are looking for.
+# Applied as a case-insensitive substring match against section_name metadata.
+# Examples caught by this filter:
+#   "Legal Proceedings"           — Tesla: surfaces for "operating income"
+#   "Other Information:"          — Alphabet: BM25 rank-1 for "operating income"
+#   "Item 4. Mine Safety"         — SEC boilerplate
+#   "Item 15. Exhibit"            — exhibit list, no financial data
+_NOISE_SECTIONS: frozenset[str] = frozenset([
+    "legal proceedings",
+    "other information",
+    "mine safety",
+    "item 15",       # Exhibit and Financial Statement Schedules index
+    "item 4",        # Mine Safety Disclosures
+])
+
+_MIN_KEEP_AFTER_FILTER = 2  # never return fewer than this many chunks after filtering
+
+
+def _filter_vec_noisy_sections(docs: list, min_keep: int = _MIN_KEEP_AFTER_FILTER) -> list:
+    """
+    Remove Chroma Document objects whose section_name matches a noise section.
+    If filtering would leave fewer than min_keep docs, returns the original list
+    so the RRF merger is never starved of input.
+    """
+    filtered = [
+        d for d in docs
+        if not any(
+            noise in (d.metadata.get("section_name") or "").lower()
+            for noise in _NOISE_SECTIONS
+        )
+    ]
+    return filtered if len(filtered) >= min_keep else docs
+
+
+def _filter_bm25_noisy_sections(results: list[dict], min_keep: int = _MIN_KEEP_AFTER_FILTER) -> list[dict]:
+    """
+    Remove bm25_query() result dicts whose section_name matches a noise section.
+    Same safe fallback: returns the original list if too many are filtered.
+    """
+    filtered = [
+        r for r in results
+        if not any(
+            noise in (r["metadata"].get("section_name") or "").lower()
+            for noise in _NOISE_SECTIONS
+        )
+    ]
+    return filtered if len(filtered) >= min_keep else results
+
+
 _RRF_K = 60  # standard RRF constant (Ch 21.2)
 
 
@@ -588,6 +642,11 @@ def retrieve_node(state: GraphState) -> dict:
     vectorstore = get_vectorstore()
     query = state["rewritten_question"] or state["question"]
     companies = state["companies_mentioned"]
+    metric_category = state.get("metric_category", "general")
+
+    # If the query is financial in nature, we aggressively filter out
+    # noisy boilerplate sections (Legal Proceedings, Mine Safety, etc.)
+    apply_noise_filter = (metric_category != "general")
 
     all_texts:   list[str]  = []
     all_sources: list[dict] = []
@@ -598,6 +657,11 @@ def retrieve_node(state: GraphState) -> dict:
                 query, k=4, filter={"company": full_name}
             )
             bm25_res = bm25_query(query, full_name, top_k=20)
+            
+            if apply_noise_filter:
+                vec_docs = _filter_vec_noisy_sections(vec_docs)
+                bm25_res = _filter_bm25_noisy_sections(bm25_res)
+                
             texts, sources = _rrf_merge(vec_docs, bm25_res, final_k=4)
             all_texts.extend(texts)
             all_sources.extend(sources)
@@ -609,6 +673,11 @@ def retrieve_node(state: GraphState) -> dict:
                 query, k=5, filter={"company": full_name}
             )
             bm25_res = bm25_query(query, full_name, top_k=20)
+            
+            if apply_noise_filter:
+                vec_docs = _filter_vec_noisy_sections(vec_docs)
+                bm25_res = _filter_bm25_noisy_sections(bm25_res)
+                
             texts, sources = _rrf_merge(vec_docs, bm25_res, final_k=5)
             all_texts.extend(texts)
             all_sources.extend(sources)
@@ -621,6 +690,11 @@ def retrieve_node(state: GraphState) -> dict:
                     query, k=4, filter={"company": full_name}
                 )
                 bm25_res = bm25_query(query, full_name, top_k=20)
+                
+                if apply_noise_filter:
+                    vec_docs = _filter_vec_noisy_sections(vec_docs)
+                    bm25_res = _filter_bm25_noisy_sections(bm25_res)
+                    
                 texts, sources = _rrf_merge(vec_docs, bm25_res, final_k=4)
                 all_texts.extend(texts)
                 all_sources.extend(sources)

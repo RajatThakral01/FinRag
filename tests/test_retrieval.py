@@ -354,7 +354,11 @@ class TestRRFMerge:
 from tools.retrieval.vectorstore import get_vectorstore as _vs
 from tools.retrieval.bm25_index import bm25_query as _bm25q
 from tools.retrieval.company_names import SHORT_TO_FULL
-from graph.nodes import _rrf_merge as _rrf
+from graph.nodes import (
+    _rrf_merge as _rrf,
+    _filter_vec_noisy_sections as _filter_vec,
+    _filter_bm25_noisy_sections as _filter_bm25
+)
 
 def _retrieve(query: str, companies: list[str], per_company_k: int = 5):
     """
@@ -375,6 +379,11 @@ def _retrieve(query: str, companies: list[str], per_company_k: int = 5):
 
         vec_docs = vs.similarity_search(query, k=per_company_k, filter={"company": full_name})
         bm25_res = _bm25q(query, full_name, top_k=20)
+        
+        # Apply section filters just like retrieve_node
+        vec_docs = _filter_vec(vec_docs)
+        bm25_res = _filter_bm25(bm25_res)
+        
         texts, sources = _rrf(vec_docs, bm25_res, final_k=per_company_k)
 
         # Chunk IDs in vector vs BM25 result (for overlap analysis)
