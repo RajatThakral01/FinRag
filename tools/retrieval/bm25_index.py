@@ -1,5 +1,5 @@
 """
-tools/retrieval/bm25_index.py
+tool/retrieval/bm25_index.py
 -------------------
 Builds and caches a BM25Okapi index over the full Chroma corpus (all 9
 companies, 3,063 chunks), then exposes a query function that scores every
@@ -9,6 +9,9 @@ Design decisions (Chapter 21, judgment calls):
   1. ONE global index — IDF is more meaningful computed over the full corpus.
   2. Pickle cache — build once, load on every subsequent run.
   3. Corpus pulled directly from Chroma .get() — same chunks as vector index.
+  4. Tokenizer version guard — if _TOKENIZER_VERSION changes, the pickle is
+     automatically invalidated and rebuilt so index-time and query-time
+     tokenization always stay in sync.
 
 The parallel arrays (documents, metadatas, ids) from Chroma .get() are stored
 alongside the BM25Okapi object inside the pickle, so rank positions map
@@ -22,16 +25,20 @@ from rank_bm25 import BM25Okapi
 import config
 from tools.retrieval.vectorstore import get_vectorstore
 
+# ---------------------------------------------------------------------------
+# Tokenizer version guard — bump this whenever _ABBREV_SUBS or _tokenize
+# logic changes.  _load_or_build_index() compares the stored version to this
+# constant and rebuilds the index from scratch if they differ.
+# ---------------------------------------------------------------------------
+_TOKENIZER_VERSION = "v2"  # v1 → v2: added net-sales/revenue synonym expansion
+
 
 # ---------------------------------------------------------------------------
 # Tokenizer — applied identically at index-build time and query time
 # ---------------------------------------------------------------------------
 
 # Abbreviation expansions applied in this order (most-specific first).
-# Order is CRITICAL: specific patterns like r&d → "research and development"
-# must fire before the generic & → "and" fallback, otherwise "R&D" would
-# expand to "R and D" (three weak tokens) instead of the full phrase that
-# actually appears in the corpus tables.
+# Order is CRITICAL: specific patterns must fire before generic fallbacks.
 # Also handles Docling's HTML-encoded & → &amp; (e.g. "R&amp;D" in tables).
 _ABBREV_SUBS = [
     # R&D — plain and HTML-encoded
@@ -40,6 +47,13 @@ _ABBREV_SUBS = [
     # SG&A — plain and HTML-encoded
     (re.compile(r'sg\s*&\s*amp\s*;\s*a', re.IGNORECASE), 'selling general and administrative'),
     (re.compile(r'sg\s*&\s*a',           re.IGNORECASE), 'selling general and administrative'),
+    # "net product sales" / "net service sales" / "net sales" → add "revenue" token.
+    # Amazon's 10-K uses these phrases instead of the generic word "revenue".
+    # Expanding to include "revenue" ensures BM25 matches revenue queries
+    # against Amazon chunks that use the "sales" terminology.
+    # Applied BEFORE the & fallback to avoid interfering with any & in the phrase.
+    (re.compile(r'net\s+(?:product\s+|service\s+|subscription\s+)?sales', re.IGNORECASE),
+     'revenue net sales'),
     # Generic fallback: remaining &amp; and & → "and"
     (re.compile(r'&amp;',                re.IGNORECASE), ' and '),
     (re.compile(r'&'),                                    ' and '),
@@ -101,6 +115,7 @@ def _build_index_from_chroma() -> dict:
     print("[bm25_index] Index built.")
 
     return {
+        "tokenizer_version": _TOKENIZER_VERSION,  # version guard for pickle validation
         "bm25": bm25,
         "documents": documents,   # list[str], parallel to metadatas and ids
         "metadatas": metadatas,   # list[dict], parallel — each has 'company' key
@@ -110,10 +125,12 @@ def _build_index_from_chroma() -> dict:
 
 def _load_or_build_index() -> dict:
     """
-    Load the pickled bundle if the cache file exists; build (and save) it
-    otherwise. Accepts the known limitation (Chapter 21.3 judgment call #2)
-    that the cache won't auto-refresh if the corpus grows — delete the .pkl
-    file to force a rebuild.
+    Load the pickled bundle if the cache file exists AND its tokenizer version
+    matches _TOKENIZER_VERSION; build (and save) it otherwise.
+
+    Version mismatch triggers an automatic rebuild — this prevents silent
+    BM25 degradation when the tokenizer changes (index-time and query-time
+    tokenization must be identical for IDF to be meaningful).
     """
     cache_path = config.BM25_INDEX_PATH
 
@@ -121,10 +138,18 @@ def _load_or_build_index() -> dict:
         print(f"[bm25_index] Loading cached index from {cache_path} ...")
         with open(cache_path, "rb") as f:
             bundle = pickle.load(f)
-        print(f"[bm25_index] Cache loaded ({len(bundle['documents'])} chunks).")
-        return bundle
 
-    # Cache miss — build from scratch
+        cached_version = bundle.get("tokenizer_version", "v1")  # pre-versioning bundles → v1
+        if cached_version == _TOKENIZER_VERSION:
+            print(f"[bm25_index] Cache loaded ({len(bundle['documents'])} chunks). "
+                  f"Tokenizer version: {cached_version}")
+            return bundle
+        else:
+            print(f"[bm25_index] Tokenizer version mismatch "
+                  f"(cached={cached_version!r}, current={_TOKENIZER_VERSION!r}). "
+                  f"Rebuilding index ...")
+
+    # Cache miss or version mismatch — build from scratch
     bundle = _build_index_from_chroma()
 
     print(f"[bm25_index] Saving index to {cache_path} ...")
