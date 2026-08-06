@@ -282,3 +282,33 @@
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
+
+/* React-Markdown styles for preview */
+.markdownContent {
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+.markdownContent table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.85em;
+  font-family: var(--font-mono);
+}
+.markdownContent th, .markdownContent td {
+  border: 1px solid var(--border-default);
+  padding: 8px 12px;
+  text-align: right;
+}
+.markdownContent td:first-child, .markdownContent th:first-child {
+  text-align: left;
+}
+.markdownContent th {
+  background: var(--bg-surface);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.markdownContent tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.02);
+}
