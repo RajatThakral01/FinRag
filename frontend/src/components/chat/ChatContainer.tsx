@@ -34,6 +34,43 @@ export const ChatContainer: React.FC = () => {
     scrollToBottom();
   }, [messages, isSubmitting]);
 
+  const loadTurns = useCallback(async (sessionId: string, showLoadingIndicator = true) => {
+    try {
+      if (showLoadingIndicator) setIsLoadingTurns(true);
+      setQueryError(null);
+      const turns = await api.getSessionTurns(sessionId);
+
+      const loadedMessages: ChatMessage[] = [];
+      turns.forEach((turn) => {
+        // User message
+        loadedMessages.push({
+          id: `turn-${turn.turn_number}-user`,
+          sender: 'user',
+          content: turn.raw_question,
+          timestamp: turn.created_at,
+        });
+
+        // Assistant message
+        loadedMessages.push({
+          id: `turn-${turn.turn_number}-assistant`,
+          sender: 'assistant',
+          rawQuestion: turn.raw_question,
+          resolvedQuestion: turn.resolved_question,
+          questionWasResolved: (turn.raw_question || '').trim() !== (turn.resolved_question || '').trim(),
+          content: turn.final_answer || 'No answer generated.',
+          errorMessage: turn.error_message,
+          timestamp: turn.created_at,
+        });
+      });
+
+      setMessages(loadedMessages);
+    } catch (err) {
+      console.error('Failed to load turns:', err);
+    } finally {
+      if (showLoadingIndicator) setIsLoadingTurns(false);
+    }
+  }, []);
+
   // Load turn history when activeSessionId changes
   useEffect(() => {
     if (!activeSessionId) {
@@ -41,53 +78,9 @@ export const ChatContainer: React.FC = () => {
       setActiveChunkId(null);
       return;
     }
-
-    let isMounted = true;
-    const loadTurns = async () => {
-      try {
-        setIsLoadingTurns(true);
-        setQueryError(null);
-        const turns = await api.getSessionTurns(activeSessionId);
-        if (!isMounted) return;
-
-        const loadedMessages: ChatMessage[] = [];
-        turns.forEach((turn) => {
-          // User message
-          loadedMessages.push({
-            id: `turn-${turn.turn_number}-user`,
-            sender: 'user',
-            content: turn.raw_question,
-            timestamp: turn.created_at,
-          });
-
-          // Assistant message
-          loadedMessages.push({
-            id: `turn-${turn.turn_number}-assistant`,
-            sender: 'assistant',
-            rawQuestion: turn.raw_question,
-            resolvedQuestion: turn.resolved_question,
-            questionWasResolved: (turn.raw_question || '').trim() !== (turn.resolved_question || '').trim(),
-            content: turn.final_answer || 'No answer generated.',
-            errorMessage: turn.error_message,
-            timestamp: turn.created_at,
-          });
-        });
-
-        setMessages(loadedMessages);
-      } catch (err) {
-        if (isMounted) {
-          console.error('Failed to load turns:', err);
-        }
-      } finally {
-        if (isMounted) setIsLoadingTurns(false);
-      }
-    };
-
-    loadTurns();
-    return () => {
-      isMounted = false;
-    };
-  }, [activeSessionId]);
+    
+    loadTurns(activeSessionId);
+  }, [activeSessionId, loadTurns]);
 
   const handleQuerySubmit = useCallback(
     async (questionText: string) => {
@@ -114,22 +107,10 @@ export const ChatContainer: React.FC = () => {
       setQueryError(null);
 
       try {
-        const response = await api.submitQuery(sessionId, questionText);
-
-        const assistantMessage: ChatMessage = {
-          id: `assistant-${Date.now()}`,
-          sender: 'assistant',
-          rawQuestion: response.raw_question,
-          resolvedQuestion: response.resolved_question,
-          questionWasResolved: response.question_was_resolved,
-          content: response.final_answer,
-          sources: response.chunk_sources,
-          errorMessage: response.error_message,
-          answerSource: response.answer_source,
-          cacheHit: response.cache_hit,
-        };
-
-        setMessages((prev) => [...prev, assistantMessage]);
+        // Re-load the session turns from the backend so we get the canonical
+        // turn numbers and IDs instead of keeping optimistic ones. We fetch
+        // silently to avoid blinking the UI.
+        await loadTurns(sessionId, false);
         refreshSessions();
       } catch (err) {
         const errStr = err instanceof Error ? err.message : String(err);
