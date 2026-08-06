@@ -97,12 +97,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onSelectC
             {isUser ? (
               message.content
             ) : (
-              <ReactMarkdown 
-                remarkPlugins={[remarkGfm]}
-                className={styles.markdownContent}
-              >
-                {message.content}
-              </ReactMarkdown>
+              <div className={styles.markdownContent}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {message.content}
+                </ReactMarkdown>
+              </div>
             )}
           </div>
 

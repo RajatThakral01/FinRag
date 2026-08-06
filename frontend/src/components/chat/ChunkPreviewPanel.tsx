@@ -56,7 +56,6 @@ export const ChunkPreviewPanel: React.FC<ChunkPreviewPanelProps> = ({
   if (!chunkId) return null;
 
   const meta = data?.metadata || {};
-  const isTable = meta.chunk_type?.toUpperCase() === 'TABLE';
 
   return (
     <aside className={styles.panel} aria-label="Chunk Preview Panel">
@@ -125,12 +124,11 @@ export const ChunkPreviewPanel: React.FC<ChunkPreviewPanelProps> = ({
               </div>
             )}
             {/* Use react-markdown to safely and beautifully render both tables and prose */}
-            <ReactMarkdown 
-              remarkPlugins={[remarkGfm]}
-              className={styles.markdownContent}
-            >
-              {data.text}
-            </ReactMarkdown>
+            <div className={styles.markdownContent}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {data.text}
+              </ReactMarkdown>
+            </div>
           </>
         ) : null}
       </div>
