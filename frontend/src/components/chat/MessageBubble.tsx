@@ -26,74 +26,8 @@ interface MessageBubbleProps {
   onSelectChunk?: (chunkId: string) => void;
 }
 
-// ---------------------------------------------------------------------------
-// Lightweight markdown-to-JSX renderer (no dependencies)
-// Handles: **bold**, *italic*, bullet lists (- / *), numbered lists, paragraphs
-// ---------------------------------------------------------------------------
-function renderMarkdown(text: string): React.ReactNode[] {
-  const lines = text.split('\n');
-  const nodes: React.ReactNode[] = [];
-  let i = 0;
-
-  const inlineFormat = (line: string, key: string): React.ReactNode => {
-    // Split by bold (**text**) and italic (*text*) markers
-    const parts = line.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g);
-    return (
-      <React.Fragment key={key}>
-        {parts.map((part, idx) => {
-          if (part.startsWith('**') && part.endsWith('**')) {
-            return <strong key={idx}>{part.slice(2, -2)}</strong>;
-          }
-          if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
-            return <em key={idx}>{part.slice(1, -1)}</em>;
-          }
-          return part;
-        })}
-      </React.Fragment>
-    );
-  };
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    // Bullet list block
-    if (/^[-*]\s/.test(line)) {
-      const items: React.ReactNode[] = [];
-      while (i < lines.length && /^[-*]\s/.test(lines[i])) {
-        items.push(<li key={i}>{inlineFormat(lines[i].replace(/^[-*]\s/, ''), `li-${i}`)}</li>);
-        i++;
-      }
-      nodes.push(<ul key={`ul-${i}`} className={styles.mdList}>{items}</ul>);
-      continue;
-    }
-
-    // Numbered list block
-    if (/^\d+\.\s/.test(line)) {
-      const items: React.ReactNode[] = [];
-      while (i < lines.length && /^\d+\.\s/.test(lines[i])) {
-        items.push(<li key={i}>{inlineFormat(lines[i].replace(/^\d+\.\s/, ''), `oli-${i}`)}</li>);
-        i++;
-      }
-      nodes.push(<ol key={`ol-${i}`} className={styles.mdList}>{items}</ol>);
-      continue;
-    }
-
-    // Empty line → paragraph spacer (only if not the first node)
-    if (line.trim() === '') {
-      if (nodes.length > 0) {
-        nodes.push(<div key={`sp-${i}`} className={styles.mdSpacer} />);
-      }
-      i++;
-      continue;
-    }
-
-    // Plain text line with inline formatting
-    nodes.push(<p key={`p-${i}`} className={styles.mdParagraph}>{inlineFormat(line, `p-${i}`)}</p>);
-    i++;
-  }
-
-  return nodes;
-}
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // Format ISO timestamp as HH:MM for today, or MMM D · HH:MM for older dates
 function formatTimestamp(iso: string): string {
@@ -160,7 +94,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onSelectC
 
           {/* Main Answer Text Body — markdown rendered for assistant, plain for user */}
           <div className={styles.textBody}>
-            {isUser ? message.content : renderMarkdown(message.content)}
+            {isUser ? (
+              message.content
+            ) : (
+              <ReactMarkdown 
+                remarkPlugins={[remarkGfm]}
+                className={styles.markdownContent}
+              >
+                {message.content}
+              </ReactMarkdown>
+            )}
           </div>
 
           {/* Sources Accordion */}
