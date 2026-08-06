@@ -22,19 +22,31 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Sync activeSessionId with URL param ?session_id=<id> or localStorage fallback
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const urlSessionId = params.get('session_id');
-    const localSessionId = localStorage.getItem(LOCAL_STORAGE_ACTIVE_KEY);
+    const syncFromUrl = () => {
+      const params = new URLSearchParams(window.location.search);
+      const urlSessionId = params.get('session_id');
+      const localSessionId = localStorage.getItem(LOCAL_STORAGE_ACTIVE_KEY);
 
-    if (urlSessionId) {
-      setActiveSessionId(urlSessionId);
-      localStorage.setItem(LOCAL_STORAGE_ACTIVE_KEY, urlSessionId);
-    } else if (localSessionId) {
-      setActiveSessionId(localSessionId);
-      // Update URL silently
-      const newUrl = `${window.location.pathname}?session_id=${localSessionId}`;
-      window.history.replaceState({ path: newUrl }, '', newUrl);
-    }
+      if (urlSessionId) {
+        setActiveSessionId(urlSessionId);
+        localStorage.setItem(LOCAL_STORAGE_ACTIVE_KEY, urlSessionId);
+      } else if (localSessionId) {
+        setActiveSessionId(localSessionId);
+        // Update URL silently
+        const newUrl = `${window.location.pathname}?session_id=${localSessionId}`;
+        window.history.replaceState({ path: newUrl }, '', newUrl);
+      }
+    };
+
+    // Initial sync
+    syncFromUrl();
+
+    // Listen to browser Back/Forward navigation
+    window.addEventListener('popstate', syncFromUrl);
+    
+    return () => {
+      window.removeEventListener('popstate', syncFromUrl);
+    };
   }, []);
 
   const selectSession = useCallback((sessionId: string) => {
