@@ -214,11 +214,11 @@ def bm25_query(query: str, company: str, top_k: int = 20) -> list[dict]:
     # Score ALL chunks in the corpus (BM25 returns one score per corpus position)
     all_scores: list[float] = bm25.get_scores(tokenized_query).tolist()
 
-    # Build (score, index) pairs, filter to requested company, then sort desc
+    # Build (score, index) pairs, filter to requested company and score > 0, then sort desc
     company_results = []
     for idx, (score, meta) in enumerate(zip(all_scores, metadatas)):
         # meta["company"] is always a non-empty string (confirmed in Step 1)
-        if meta.get("company") == company:
+        if meta.get("company") == company and score > 0.0:
             company_results.append((score, idx))
 
     company_results.sort(key=lambda x: x[0], reverse=True)
