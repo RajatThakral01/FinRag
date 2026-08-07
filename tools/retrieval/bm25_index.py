@@ -30,7 +30,7 @@ from tools.retrieval.vectorstore import get_vectorstore
 # logic changes.  _load_or_build_index() compares the stored version to this
 # constant and rebuilds the index from scratch if they differ.
 # ---------------------------------------------------------------------------
-_TOKENIZER_VERSION = "v2"  # v1 → v2: added net-sales/revenue synonym expansion
+_TOKENIZER_VERSION = "v3"  # v2 → v3: preserved internal punctuation (decimals, commas, hyphens)
 
 
 # ---------------------------------------------------------------------------
@@ -76,8 +76,8 @@ def _tokenize(text: str) -> list[str]:
     text = text.lower()
     for pattern, replacement in _ABBREV_SUBS:
         text = pattern.sub(replacement, text)
-    text = re.sub(r'[^\w\s]', ' ', text)   # strip remaining punctuation
-    return [tok for tok in text.split() if tok]
+    # Extract tokens, preserving internal punctuation like 1.5, 1,000, COVID-19, and don't
+    return re.findall(r'\w+(?:[.,\-\']\w+)*', text)
 
 
 # ---------------------------------------------------------------------------
