@@ -211,6 +211,9 @@ def bm25_query(query: str, company: str, top_k: int = 20) -> list[dict]:
     # Tokenize query identically to how documents were tokenized at build time
     tokenized_query = _tokenize(query)
 
+    if not tokenized_query:
+        return []
+
     # Score ALL chunks in the corpus (BM25 returns one score per corpus position)
     all_scores: list[float] = bm25.get_scores(tokenized_query).tolist()
 
