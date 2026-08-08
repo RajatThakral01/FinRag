@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { api } from './api/client';
 import type { SessionSummary } from './api/types';
 
@@ -20,41 +21,33 @@ export const SessionProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [isLoadingSessions, setIsLoadingSessions] = useState<boolean>(true);
 
-  // Sync activeSessionId with URL param ?session_id=<id> or localStorage fallback
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Sync activeSessionId with URL path /s/<id>
   useEffect(() => {
-    const syncFromUrl = () => {
-      const params = new URLSearchParams(window.location.search);
-      const urlSessionId = params.get('session_id');
-      const localSessionId = localStorage.getItem(LOCAL_STORAGE_ACTIVE_KEY);
+    const match = location.pathname.match(/^\/s\/([^/]+)/);
+    const urlSessionId = match ? match[1] : null;
+    const localSessionId = localStorage.getItem(LOCAL_STORAGE_ACTIVE_KEY);
 
-      if (urlSessionId) {
-        setActiveSessionId(urlSessionId);
-        localStorage.setItem(LOCAL_STORAGE_ACTIVE_KEY, urlSessionId);
-      } else if (localSessionId) {
-        setActiveSessionId(localSessionId);
-        // Update URL silently
-        const newUrl = `${window.location.pathname}?session_id=${localSessionId}`;
-        window.history.replaceState({ path: newUrl }, '', newUrl);
+    if (urlSessionId) {
+      setActiveSessionId(urlSessionId);
+      localStorage.setItem(LOCAL_STORAGE_ACTIVE_KEY, urlSessionId);
+    } else if (localSessionId) {
+      // If we are at root, redirect to the last known session
+      if (location.pathname === '/') {
+        navigate(`/s/${localSessionId}`, { replace: true });
+      } else {
+        setActiveSessionId(null);
       }
-    };
-
-    // Initial sync
-    syncFromUrl();
-
-    // Listen to browser Back/Forward navigation
-    window.addEventListener('popstate', syncFromUrl);
-    
-    return () => {
-      window.removeEventListener('popstate', syncFromUrl);
-    };
-  }, []);
+    } else {
+      setActiveSessionId(null);
+    }
+  }, [location.pathname, navigate]);
 
   const selectSession = useCallback((sessionId: string) => {
-    setActiveSessionId(sessionId);
-    localStorage.setItem(LOCAL_STORAGE_ACTIVE_KEY, sessionId);
-    const newUrl = `${window.location.pathname}?session_id=${sessionId}`;
-    window.history.pushState({ path: newUrl }, '', newUrl);
-  }, []);
+    navigate(`/s/${sessionId}`);
+  }, [navigate]);
 
   const refreshSessions = useCallback(async () => {
     try {
