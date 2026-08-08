@@ -17,6 +17,7 @@ export const ChatContainer: React.FC = () => {
   const [queryError, setQueryError] = useState<string | null>(null);
   const [activeChunkId, setActiveChunkId] = useState<string | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
