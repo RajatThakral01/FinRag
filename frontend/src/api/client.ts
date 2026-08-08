@@ -10,6 +10,17 @@ import type {
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
+async function safeFetch(url: string, options?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, options);
+  } catch (err) {
+    if (err instanceof TypeError && err.message.includes('Failed to fetch')) {
+      throw new Error('Backend is offline. Please ensure the server is running on port 8000.');
+    }
+    throw err;
+  }
+}
+
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let errorDetail = `HTTP error ${response.status}`;
@@ -33,7 +44,7 @@ export const api = {
    * Health check to detect backend status
    */
   async checkHealth(): Promise<HealthResponse> {
-    const res = await fetch(`${API_BASE_URL}/health`);
+    const res = await safeFetch(`${API_BASE_URL}/health`);
     return handleResponse<HealthResponse>(res);
   },
 
@@ -41,7 +52,7 @@ export const api = {
    * Create a new session
    */
   async createSession(title?: string): Promise<CreateSessionResponse> {
-    const res = await fetch(`${API_BASE_URL}/sessions`, {
+    const res = await safeFetch(`${API_BASE_URL}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: title ? JSON.stringify({ title }) : undefined,
@@ -53,7 +64,7 @@ export const api = {
    * List all sessions ordered by most recently active first
    */
   async listSessions(): Promise<SessionSummary[]> {
-    const res = await fetch(`${API_BASE_URL}/sessions`);
+    const res = await safeFetch(`${API_BASE_URL}/sessions`);
     return handleResponse<SessionSummary[]>(res);
   },
 
@@ -61,7 +72,7 @@ export const api = {
    * Get full turn history for a session
    */
   async getSessionTurns(sessionId: string): Promise<TurnItem[]> {
-    const res = await fetch(
+    const res = await safeFetch(
       `${API_BASE_URL}/sessions/${encodeURIComponent(sessionId)}/turns`
     );
     return handleResponse<TurnItem[]>(res);
@@ -71,7 +82,7 @@ export const api = {
    * Submit a query to a session
    */
   async submitQuery(sessionId: string, question: string): Promise<QueryResponse> {
-    const res = await fetch(
+    const res = await safeFetch(
       `${API_BASE_URL}/sessions/${encodeURIComponent(sessionId)}/query`,
       {
         method: 'POST',
@@ -86,7 +97,7 @@ export const api = {
    * Fetch full chunk text and metadata by chunk_id
    */
   async getChunk(chunkId: string): Promise<ChunkDetailResponse> {
-    const res = await fetch(
+    const res = await safeFetch(
       `${API_BASE_URL}/chunks/${encodeURIComponent(chunkId)}`
     );
     return handleResponse<ChunkDetailResponse>(res);
