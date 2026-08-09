@@ -83,6 +83,24 @@
   text-transform: uppercase;
 }
 
+.copyBtn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.copyBtn:hover {
+  background: var(--bg-body);
+  color: var(--text-primary);
+}
+
 .cacheHitBadge {
   display: inline-flex;
   align-items: center;

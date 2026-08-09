@@ -1,5 +1,5 @@
-import React from 'react';
-import { User, FileText, CheckCircle2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { User, FileText, CheckCircle2, Copy, Check } from 'lucide-react';
 import type { ChunkSource } from '../../api/types';
 import { ResolvedQuestionBadge } from './ResolvedQuestionBadge';
 import { SourcesPanel } from './SourcesPanel';
@@ -28,6 +28,8 @@ interface MessageBubbleProps {
 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 // Format ISO timestamp as HH:MM for today, or MMM D · HH:MM for older dates
 function formatTimestamp(iso: string): string {
@@ -44,6 +46,13 @@ function formatTimestamp(iso: string): string {
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onSelectChunk }) => {
   const isUser = message.sender === 'user';
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(message.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <div className={`${styles.row} ${isUser ? styles.userRow : styles.assistantRow}`}>
@@ -66,9 +75,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onSelectC
               </span>
             )}
           </div>
-          {message.timestamp && (
-            <span className={styles.timestamp}>{formatTimestamp(message.timestamp)}</span>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {message.timestamp && (
+              <span className={styles.timestamp}>{formatTimestamp(message.timestamp)}</span>
+            )}
+            {!isUser && (
+              <button className={styles.copyBtn} onClick={handleCopy} title="Copy to clipboard">
+                {copied ? <Check size={14} color="var(--accent-success)" /> : <Copy size={14} />}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Audit Card Bubble */}
@@ -98,7 +114,27 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onSelectC
               message.content
             ) : (
               <div className={styles.markdownContent}>
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <ReactMarkdown 
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    code({node, inline, className, children, ...props}: any) {
+                      const match = /language-(\w+)/.exec(className || '')
+                      return !inline && match ? (
+                        <SyntaxHighlighter
+                          {...props}
+                          children={String(children).replace(/\n$/, '')}
+                          style={vscDarkPlus}
+                          language={match[1]}
+                          PreTag="div"
+                        />
+                      ) : (
+                        <code {...props} className={className}>
+                          {children}
+                        </code>
+                      )
+                    }
+                  }}
+                >
                   {message.content}
                 </ReactMarkdown>
               </div>
