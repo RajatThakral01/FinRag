@@ -1,5 +1,5 @@
 import React from 'react';
-import styles from './ChatContainer.module.css';
+import styles from './WelcomeScreen.module.css';
 import { EXAMPLE_QUERIES } from '../../constants';
 
 interface WelcomeScreenProps {
