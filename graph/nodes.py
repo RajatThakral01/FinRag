@@ -1,6 +1,3 @@
-import sys
-import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
