@@ -1,5 +1,9 @@
 import React, { useState } from 'react';
 import { User, FileText, CheckCircle2, Copy, Check } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import type { ChunkSource } from '../../api/types';
 import { ResolvedQuestionBadge } from './ResolvedQuestionBadge';
 import { SourcesPanel } from './SourcesPanel';
@@ -26,10 +30,6 @@ interface MessageBubbleProps {
   onSelectChunk?: (chunkId: string) => void;
 }
 
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 // Format ISO timestamp as HH:MM for today, or MMM D · HH:MM for older dates
 function formatTimestamp(iso: string): string {
