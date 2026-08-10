@@ -37,9 +37,3 @@ def create_initial_state(question: str) -> GraphState:
         "conversation_context": None,
         "metric_category": "",
     }
-
-
-if __name__ == "__main__":
-    state = create_initial_state("What was Apple's total revenue in fiscal year 2024?")
-    for key, value in state.items():
-        print(f"{key}: {value!r}")
