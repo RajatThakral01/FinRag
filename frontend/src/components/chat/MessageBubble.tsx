@@ -75,7 +75,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onSelectC
               </span>
             )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className={styles.metaRight}>
             {message.timestamp && (
               <span className={styles.timestamp}>{formatTimestamp(message.timestamp)}</span>
             )}

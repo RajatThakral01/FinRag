@@ -83,6 +83,12 @@
   text-transform: uppercase;
 }
 
+.metaRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .copyBtn {
   background: transparent;
   border: none;
