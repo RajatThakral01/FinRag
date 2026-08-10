@@ -1,17 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { CornerDownLeft, Terminal } from 'lucide-react';
+import { SAMPLE_QUERIES } from '../../constants';
 import styles from './ChatInput.module.css';
 
 interface ChatInputProps {
   onSubmit: (question: string) => void;
   isLoading: boolean;
 }
-
-const SAMPLE_QUERIES = [
-  "What was Apple's total revenue in 2024?",
-  "What was NVIDIA's R&D expense in 2024?",
-  "Compare Apple and Microsoft operating income",
-];
 
 export const ChatInput: React.FC<ChatInputProps> = ({ onSubmit, isLoading }) => {
   const [query, setQuery] = useState('');
