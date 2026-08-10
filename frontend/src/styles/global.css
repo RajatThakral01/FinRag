@@ -28,14 +28,6 @@ input, textarea {
   font-family: inherit;
 }
 
-/* Monospace Tabular Numerals - Primary Text Color */
-.tabular-nums {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-primary);
-  letter-spacing: -0.01em;
-}
-
 /* Custom Scrollbars */
 ::-webkit-scrollbar {
   width: 4px;
