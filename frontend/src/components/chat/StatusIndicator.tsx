@@ -6,6 +6,7 @@ export type TaskStage = 'idle' | 'resolving' | 'retrieving' | 'grading' | 'gener
 
 interface StatusIndicatorProps {
   isLoading: boolean;
+  onStageChange?: (label: string) => void;
 }
 
 const STAGES: { stage: TaskStage; label: string; icon: React.FC<{ size?: number; className?: string }> }[] = [
@@ -22,7 +23,7 @@ const TIMERS = [1500, 3000, 5000, 8000];
 // Show slow-query note after this many ms on the final stage
 const SLOW_QUERY_MS = 10000;
 
-export const StatusIndicator: React.FC<StatusIndicatorProps> = ({ isLoading }) => {
+export const StatusIndicator: React.FC<StatusIndicatorProps> = ({ isLoading, onStageChange }) => {
   const [currentStageIdx, setCurrentStageIdx] = useState(0);
   const [showSlowNote, setShowSlowNote] = useState(false);
 
@@ -47,10 +48,16 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({ isLoading }) =
     };
   }, [isLoading]);
 
-  if (!isLoading) return null;
-
-  // Clamp to last stage — holds indefinitely until the API call completes
   const activeStage = STAGES[Math.min(currentStageIdx, STAGE_COUNT - 1)];
+
+  // Notify parent about stage label changes
+  useEffect(() => {
+    if (isLoading && onStageChange) {
+      onStageChange(activeStage.label);
+    }
+  }, [activeStage.label, isLoading, onStageChange]);
+
+  if (!isLoading) return null;
   const StageIcon = activeStage.icon;
 
   return (

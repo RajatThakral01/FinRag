@@ -1,0 +1,110 @@
+/* TypingBubble — mirrors the layout of MessageBubble for spatial consistency */
+
+.row {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto 20px auto;
+  flex-direction: row;
+  animation: fadeIn 150ms ease-out forwards;
+}
+
+.avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+  background: var(--bg-surface);
+  color: var(--accent-sole);
+  border: 1px solid var(--border-default);
+}
+
+.bubbleContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: calc(100% - 46px);
+  width: 100%;
+  align-items: flex-start;
+}
+
+.metaRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.68rem;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+}
+
+.senderName {
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.bubble {
+  padding: 14px 18px;
+  border-radius: var(--radius-md);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-left: 3px solid var(--accent-sole);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 160px;
+}
+
+/* --- Bouncing dots --- */
+.dotsRow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-sole);
+  display: block;
+  animation: bounce 1.2s ease-in-out infinite;
+  opacity: 0.7;
+}
+
+.dot:nth-child(1) { animation-delay: 0ms; }
+.dot:nth-child(2) { animation-delay: 160ms; }
+.dot:nth-child(3) { animation-delay: 320ms; }
+
+@keyframes bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.5;
+  }
+  30% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}
+
+/* Stage label */
+.stageLabel {
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  font-style: italic;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

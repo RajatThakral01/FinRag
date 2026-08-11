@@ -4,6 +4,7 @@ import { useSessionContext } from '../../SessionContext';
 import { api } from '../../api/client';
 import { MessageBubble, type ChatMessage } from './MessageBubble';
 import { StatusIndicator } from './StatusIndicator';
+import { TypingBubble } from './TypingBubble';
 import { ChatInput } from './ChatInput';
 import { ChunkPreviewPanel } from './ChunkPreviewPanel';
 import { WelcomeScreen } from './WelcomeScreen';
@@ -16,6 +17,7 @@ export const ChatContainer: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [queryError, setQueryError] = useState<string | null>(null);
   const [activeChunkId, setActiveChunkId] = useState<string | null>(null);
+  const [typingStage, setTypingStage] = useState<string>('Processing query...');
   const contentRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -139,12 +141,13 @@ export const ChatContainer: React.FC = () => {
             ))
           )}
 
-          {/* Pending Query Status Indicator */}
+          {/* Typing bubble — shown in-place where the answer will appear */}
           {isSubmitting && (
-            <div className={styles.statusRow}>
-              <StatusIndicator isLoading={isSubmitting} />
-            </div>
+            <TypingBubble stage={typingStage} />
           )}
+
+          {/* Hidden StatusIndicator drives the stage label via callback */}
+          <StatusIndicator isLoading={isSubmitting} onStageChange={setTypingStage} />
 
           {/* API Error Notification */}
           {queryError && (
