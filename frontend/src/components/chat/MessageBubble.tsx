@@ -27,6 +27,7 @@ export interface ChatMessage {
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  index?: number;
   onSelectChunk?: (chunkId: string) => void;
 }
 
@@ -44,9 +45,12 @@ function formatTimestamp(iso: string): string {
   return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} · ${time}`;
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onSelectChunk }) => {
+export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, index = 0, onSelectChunk }) => {
   const isUser = message.sender === 'user';
   const [copied, setCopied] = useState(false);
+
+  // Stagger entrance: cap at first 8 messages so long sessions feel instant
+  const staggerDelay = `${Math.min(index, 8) * 60}ms`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
@@ -55,7 +59,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onSelectC
   };
 
   return (
-    <div className={`${styles.row} ${isUser ? styles.userRow : styles.assistantRow}`}>
+    <div
+      className={`${styles.row} ${isUser ? styles.userRow : styles.assistantRow}`}
+      style={{ animationDelay: staggerDelay }}
+    >
       {/* Avatar */}
       <div className={`${styles.avatar} ${isUser ? styles.userAvatar : styles.assistantAvatar}`}>
         {isUser ? <User size={15} /> : <FileText size={15} />}

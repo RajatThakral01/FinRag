@@ -4,7 +4,7 @@
   width: 100%;
   max-width: 860px;
   margin: 0 auto 20px auto;
-  animation: fadeIn 150ms ease-out forwards;
+  animation: fadeIn 200ms ease-out both;
 }
 
 .userRow {

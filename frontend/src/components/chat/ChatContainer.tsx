@@ -146,10 +146,11 @@ export const ChatContainer: React.FC = () => {
           ) : messages.length === 0 ? (
             <WelcomeScreen onQueryClick={handleQuerySubmit} isSubmitting={isSubmitting} />
           ) : (
-            messages.map((msg) => (
+            messages.map((msg, idx) => (
               <MessageBubble
                 key={msg.id}
                 message={msg}
+                index={idx}
                 onSelectChunk={(chunkId) => setActiveChunkId(chunkId)}
               />
             ))
