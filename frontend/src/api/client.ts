@@ -79,6 +79,20 @@ export const api = {
   },
 
   /**
+   * Rename a session
+   */
+  async updateSessionTitle(sessionId: string, title: string): Promise<void> {
+    await safeFetch(
+      `${API_BASE_URL}/sessions/${encodeURIComponent(sessionId)}/title`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      }
+    );
+  },
+
+  /**
    * Submit a query to a session
    */
   async submitQuery(sessionId: string, question: string): Promise<QueryResponse> {

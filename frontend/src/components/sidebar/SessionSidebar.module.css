@@ -153,6 +153,19 @@
   text-overflow: ellipsis;
 }
 
+.itemTitleInput {
+  font-size: 0.82rem;
+  font-weight: 500;
+  background: var(--bg-body);
+  border: 1px solid var(--accent-sole);
+  border-radius: 2px;
+  color: var(--text-primary);
+  padding: 1px 4px;
+  width: 100%;
+  font-family: var(--font-sans);
+  outline: none;
+}
+
 .itemDate {
   font-size: 0.68rem;
   font-family: var(--font-mono);

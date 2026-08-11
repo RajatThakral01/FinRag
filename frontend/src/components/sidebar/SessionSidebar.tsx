@@ -6,7 +6,7 @@ import { HealthBadge } from '../common/HealthBadge';
 import styles from './SessionSidebar.module.css';
 
 export const SessionSidebar: React.FC = () => {
-  const { sessions, activeSessionId, createSession, selectSession, isLoadingSessions } =
+  const { sessions, activeSessionId, createSession, selectSession, isLoadingSessions, refreshSessions } =
     useSessionContext();
 
   const handleNewSession = async () => {
@@ -55,6 +55,7 @@ export const SessionSidebar: React.FC = () => {
                 session={session}
                 isActive={session.session_id === activeSessionId}
                 onSelect={selectSession}
+                onRename={refreshSessions}
               />
             ))}
           </div>

@@ -30,6 +30,9 @@ app.add_middleware(
 class SessionCreateRequest(BaseModel):
     title: Optional[str] = None
 
+class TitleUpdateRequest(BaseModel):
+    title: str
+
 class QueryRequest(BaseModel):
     question: str
 
@@ -51,6 +54,15 @@ def create_new_session(request: Optional[SessionCreateRequest] = None):
         "session_id": session_id,
         "created_at": session_data["created_at"]
     }
+
+@app.put("/sessions/{session_id}/title")
+def rename_session(session_id: str, request: TitleUpdateRequest):
+    """Rename an existing session."""
+    session = get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found.")
+    update_session_title(session_id, request.title.strip())
+    return {"ok": True}
 
 @app.get("/sessions")
 def get_all_sessions():
