@@ -97,3 +97,38 @@
   border-top: 1px solid var(--border-default);
   background: var(--bg-app);
 }
+
+/* Scroll-to-bottom floating button */
+.scrollToBottomBtn {
+  position: absolute;
+  bottom: 100px; /* just above the input bar */
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 20px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  transition: all var(--transition-fast);
+  animation: fadeInUp 200ms ease-out forwards;
+}
+
+.scrollToBottomBtn:hover {
+  background: var(--bg-surface-hover);
+  border-color: var(--accent-sole);
+  color: var(--text-primary);
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}

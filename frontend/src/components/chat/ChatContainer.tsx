@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import { AlertCircle, RefreshCw, ChevronDown } from 'lucide-react';
 import { useSessionContext } from '../../SessionContext';
 import { api } from '../../api/client';
 import { MessageBubble, type ChatMessage } from './MessageBubble';
@@ -20,10 +20,20 @@ export const ChatContainer: React.FC = () => {
   const [typingStage, setTypingStage] = useState<string>('Processing query...');
   const contentRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  // Detect whether we are near the bottom of the scroll area
+  const handleScroll = useCallback(() => {
+    const el = scrollAreaRef.current;
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollBtn(distFromBottom > 120);
+  }, []);
 
   useEffect(() => {
     if (!contentRef.current) return;
@@ -125,7 +135,11 @@ export const ChatContainer: React.FC = () => {
   return (
     <div className={styles.container}>
       {/* Messages Scroll Area */}
-      <div className={styles.scrollArea}>
+      <div
+        className={styles.scrollArea}
+        ref={scrollAreaRef}
+        onScroll={handleScroll}
+      >
         <div ref={contentRef} style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
           {isLoadingTurns ? (
             <div className={styles.centerNotice}>Accessing session audit registry...</div>
@@ -172,6 +186,18 @@ export const ChatContainer: React.FC = () => {
       <div className={styles.inputContainer}>
         <ChatInput onSubmit={handleQuerySubmit} isLoading={isSubmitting} />
       </div>
+
+      {/* Scroll-to-bottom button — visible when user has scrolled up */}
+      {showScrollBtn && messages.length > 0 && (
+        <button
+          className={styles.scrollToBottomBtn}
+          onClick={scrollToBottom}
+          title="Jump to latest message"
+        >
+          <ChevronDown size={13} />
+          JUMP TO LATEST
+        </button>
+      )}
 
       {/* Full Chunk Slide-in Preview Panel */}
       <ChunkPreviewPanel
