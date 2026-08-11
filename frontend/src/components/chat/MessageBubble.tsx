@@ -9,6 +9,7 @@ import { ResolvedQuestionBadge } from './ResolvedQuestionBadge';
 import { SourcesPanel } from './SourcesPanel';
 import { WarningBanner } from './WarningBanner';
 import { HonestFailureCard } from './HonestFailureCard';
+import { useToast } from '../../ToastContext';
 import styles from './MessageBubble.module.css';
 
 export interface ChatMessage {
@@ -48,6 +49,7 @@ function formatTimestamp(iso: string): string {
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, index = 0, onSelectChunk }) => {
   const isUser = message.sender === 'user';
   const [copied, setCopied] = useState(false);
+  const { showToast } = useToast();
 
   // Stagger entrance: cap at first 8 messages so long sessions feel instant
   const staggerDelay = `${Math.min(index, 8) * 60}ms`;
@@ -55,6 +57,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, index = 0
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content);
     setCopied(true);
+    showToast('Answer copied to clipboard', 'success');
     setTimeout(() => setCopied(false), 2000);
   };
 

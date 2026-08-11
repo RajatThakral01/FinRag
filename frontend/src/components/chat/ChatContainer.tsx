@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AlertCircle, RefreshCw, ChevronDown } from 'lucide-react';
 import { useSessionContext } from '../../SessionContext';
+import { useToast } from '../../ToastContext';
 import { api } from '../../api/client';
 import { MessageBubble, type ChatMessage } from './MessageBubble';
 import { StatusIndicator } from './StatusIndicator';
@@ -12,6 +13,7 @@ import styles from './ChatContainer.module.css';
 
 export const ChatContainer: React.FC = () => {
   const { activeSessionId, createSession, refreshSessions } = useSessionContext();
+  const { showToast } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoadingTurns, setIsLoadingTurns] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -99,8 +101,11 @@ export const ChatContainer: React.FC = () => {
       if (!sessionId) {
         try {
           sessionId = await createSession();
+          showToast('New research session started', 'info');
         } catch (err) {
-          setQueryError(`Failed to initialize session: ${err instanceof Error ? err.message : String(err)}`);
+          const msg = `Failed to initialize session: ${err instanceof Error ? err.message : String(err)}`;
+          setQueryError(msg);
+          showToast(msg, 'error');
           return;
         }
       }
@@ -125,6 +130,7 @@ export const ChatContainer: React.FC = () => {
       } catch (err) {
         const errStr = err instanceof Error ? err.message : String(err);
         setQueryError(errStr);
+        showToast(errStr, 'error');
       } finally {
         setIsSubmitting(false);
       }
