@@ -122,20 +122,43 @@ export const ChatContainer: React.FC = () => {
       setQueryError(null);
 
       try {
-        // Re-load the session turns from the backend so we get the canonical
-        // turn numbers and IDs instead of keeping optimistic ones. We fetch
-        // silently to avoid blinking the UI.
-        await loadTurns(sessionId, false);
+        // ── Submit the query to the backend ──────────────────────────────
+        const result = await api.submitQuery(sessionId, questionText);
+
+        const assistantMessage: ChatMessage = {
+          id: `assistant-${Date.now()}`,
+          sender: 'assistant',
+          rawQuestion: result.raw_question,
+          resolvedQuestion: result.resolved_question,
+          questionWasResolved: result.question_was_resolved,
+          content: result.final_answer || 'No answer generated.',
+          sources: result.chunk_sources,
+          errorMessage: result.error_message,
+          answerSource: result.cache_hit ? 'cache' : 'retrieval',
+          cacheHit: result.cache_hit,
+        };
+
+        // Replace the optimistic user message with the canonical server
+        // response then re-load turns so IDs are stable on next load.
+        setMessages((prev) => [
+          ...prev.filter((m) => m.id !== tempUserMsgId),
+          userMessage,
+          assistantMessage,
+        ]);
+
+        // Silently refresh the session list (title may have been set)
         refreshSessions();
       } catch (err) {
         const errStr = err instanceof Error ? err.message : String(err);
+        // Remove the optimistic user message so the UI is consistent
+        setMessages((prev) => prev.filter((m) => m.id !== tempUserMsgId));
         setQueryError(errStr);
         showToast(errStr, 'error');
       } finally {
         setIsSubmitting(false);
       }
     },
-    [activeSessionId, createSession, refreshSessions]
+    [activeSessionId, createSession, refreshSessions, showToast]
   );
 
   return (
